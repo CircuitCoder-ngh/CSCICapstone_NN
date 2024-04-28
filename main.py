@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import customCallbacks
 import requests
 import datetime
+import os
 from sklearn import preprocessing
 from keras.models import Sequential
 from keras.layers import Dense, LSTM, Dropout
@@ -238,6 +239,12 @@ def csvToArray(filename):
     return np.array(dataset)
 
 
+def listToCSV(array, file_path):
+    df = pd.DataFrame(array)
+    df.to_csv(file_path, index=False)
+    print(f"Data saved to {file_path}")
+
+
 def createConfusionMatrix(model, model_name, t_data, t_labels, threshold):
     """Creates and saves a confusion matrix
     Parameters: model, a chosen name for the model, and test data appropriate for the model"""
@@ -250,7 +257,7 @@ def createConfusionMatrix(model, model_name, t_data, t_labels, threshold):
 
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
-    plt.savefig(f'models/groupBcm/{model_name}CM.png')
+    plt.savefig(f'models/groupB2cm/{model_name}CM.png')
     plt.close()
     # plt.show()
 
@@ -278,32 +285,10 @@ def create3dDataset(dataset, data_labels, look_back):  # look_back must be 1 w/ 
     return dataX, dataY
 
 
-
-# maybe create a fn that creates models based off the params I am changing
-# def create_new_model(train_data, train_labels,
-
-# combineDataToCSV(symbol="SPY", outputsize="5000", interval="5min", time_period="14")
-# createTrainingLabelCSV('SPY5min14.csv', 0.2)
-# normalizeListToCSV('SPY5min14.csv')
-training_data = csvToArray('SPY5min14_Normalized.csv')[:-12]
-training_data = np.delete(training_data, 4, axis=1)  # removes 'open'
-training_data = np.delete(training_data, 3, axis=1)  # removes 'low'
-training_data = np.delete(training_data, 2, axis=1)  # removes 'high'
-training_labels = csvToArray('SPY5min14.csv_TrainingLabels0.2.csv')[:-12]
-
-full_t_data = training_data
-full_l_data = training_labels
-test_size = int(len(training_data) * 0.8)
-test_data = training_data[test_size:]
-test_labels = training_labels[test_size:]
-training_data = training_data[:test_size]  # added after model8 created
-training_labels = training_labels[:test_size]  # added after model8 created
-# test_data, test_labels = create3dDataset(test_data, test_labels, 2)
-
-
 def createNewModel(train_data, train_labels, test_data, test_labels,
                    ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb):
-    """Assumes input shape of 7"""
+    """Assumes input shape of 7
+    error: ld label is ld-=1 if llstm > 0"""
 
     model = Sequential()
 
@@ -337,6 +322,64 @@ def createNewModel(train_data, train_labels, test_data, test_labels,
     createConfusionMatrix(model, f'{model_name}_full', train_data, train_labels, ts)
 
 
+def testResultsCSV(group):
+    """reads in all models from models/{group} and evaluates them on training and test data
+    saves results in a csv"""
+    path = f"models/{group}"
+    dirs = os.listdir(path)
+    groupresults = []
+
+    for file in dirs:
+        if file.endswith(".keras"):
+            print(file)
+            model = keras.models.load_model(f'models/{group}/{file}')
+            config = model.get_config()  # Returns pretty much every information about your model
+            in_shape = config["layers"][0]["config"]["batch_input_shape"]
+            print(in_shape)  # returns a tuple of width, height and channels
+            train_data, train_labels = training_data, training_labels
+            tst_data, tst_labels = test_data, test_labels
+            if len(in_shape) > 2:
+                train_data, train_labels = create3dDataset(training_data, training_labels, in_shape[1])
+                tst_data, tst_labels = create3dDataset(test_data, test_labels, in_shape[1])
+
+            # evaluate model and save results to array
+            train_prec = model.evaluate(train_data, train_labels)
+            test_prec = model.evaluate(tst_data, tst_labels)
+            groupresults.append([file, train_prec, test_prec])
+
+    # Create a DataFrame from the combined list
+    df = pd.DataFrame(groupresults)
+
+    # Specify the CSV file path (adjust as needed)
+    csv_file_path = f'{group}results.csv'
+
+    # Write the DataFrame to the CSV file
+    df.to_csv(csv_file_path, index=False)
+
+    print(f"Data saved to {csv_file_path}")
+
+
+# maybe create a fn that creates models based off the params I am changing
+# def create_new_model(train_data, train_labels,
+
+# combineDataToCSV(symbol="SPY", outputsize="5000", interval="5min", time_period="14")
+# createTrainingLabelCSV('SPY5min14.csv', 0.2)
+# normalizeListToCSV('SPY5min14.csv')
+training_data = csvToArray('SPY5min14_Normalized.csv')[:-12]
+training_data = np.delete(training_data, 4, axis=1)  # removes 'open'
+training_data = np.delete(training_data, 3, axis=1)  # removes 'low'
+training_data = np.delete(training_data, 2, axis=1)  # removes 'high'
+training_labels = csvToArray('SPY5min14.csv_TrainingLabels0.2.csv')[:-12]
+
+full_t_data = training_data
+full_l_data = training_labels
+test_size = int(len(training_data) * 0.8)
+test_data = training_data[test_size:]
+test_labels = training_labels[test_size:]
+training_data = training_data[:test_size]  # added after model8 created
+training_labels = training_labels[:test_size]  # added after model8 created
+# test_data, test_labels = create3dDataset(test_data, test_labels, 2)
+
 thresholds = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
 layers_LSTM = [3]  # [1, 2, 3]  # [0, 1, 2, 3]
 units_LSTM = [64]  # [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
@@ -348,90 +391,82 @@ units_Dense = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
 num_epoch = [50, 100, 150, 200]
 size_batch = [3, 6, 12, 24]
 
+
+def plotGroupResults(filename):
+    # get results from csv and plot in graph
+    x = []
+    tstp_y = []
+    tstl_y = []
+    trp_y = []
+    trl_y = []
+    # over_60 = []
+    # over_80 = []
+    list = csvToList(filename)
+    for item in list:
+        # item[1][0] == train_loss, item[1][1] == train_prec, item[2][0] == test_loss, item[2][1] == test_prec
+        trn = eval(item[1])  # np.array(item[1])
+        tst = eval(item[2])  # np.array(item[2])
+        tst_l = tst[0]  # float(tst.item(0)[1:15])
+        tst_p = tst[1]  # float(tst.item(0)[21:-1])
+        trn_l = trn[0]  # float(trn.item(0)[1:15])
+        trn_p = trn[1]  # float(trn.item(0)[21:-1])
+        if tst_p > 1: tst_p = 0
+        if trn_p > 1: trn_p = 0
+        # if tst_p > 0.6: over_60.append(item)
+        # if tst_p > 0.8: over_80.append(item)
+        x.append(item[0])
+        tstp_y.append(tst_p)
+        tstl_y.append(tst_l)
+        trp_y.append(trn_p)
+        trl_y.append(trn_l)
+
+    # save over_60 and over_80 results for groupB
+    # listToCSV(over_60)
+    # listToCSV(over_80)
+
+    plt.plot(x, tstp_y, label="GroupBTestDataPrecisionResults")
+    plt.xlabel('Model Name')
+    plt.ylabel('Precision')
+    plt.show()
+    # plt.savefig(f'models/groupBcm/GroupBTestDataPrecisionResults.png')  # fix this
+    # plt.close()
+
+
+# plotGroupResults('groupB_testResultsOver60.csv')
+
+# list60 = csvToList('groupB_testResultsOver60.csv')
+# list60.pop(0)
+# for item in list60:
+#     # load model, train it on data, save it in groupB2, save confusion matrix
+#     model = keras.models.load_model(f'models/groupB/{item[0]}')
+#     mname = f'{item[0][:-11]}250_3'
+#     # get model config, reshape data if necessary
+#     config = model.get_config()  # Returns pretty much every information about your model
+#     in_shape = config["layers"][0]["config"]["batch_input_shape"]
+#     print(in_shape)  # returns a tuple of width, height and channels
+#     train_data, train_labels = training_data, training_labels
+#     tst_data, tst_labels = test_data, test_labels
+#     if len(in_shape) > 2:
+#         train_data, train_labels = create3dDataset(training_data, training_labels, in_shape[1])
+#         tst_data, tst_labels = create3dDataset(test_data, test_labels, in_shape[1])
+#     model.fit(train_data, train_labels, epochs=250, batch_size=3)
+#
+#     # save model and cm to groupB2
+#     model.save(f'models/groupB2/{mname}.keras')
+#
+#     model.evaluate(tst_data, tst_labels)
+#     createConfusionMatrix(model, mname, tst_data, tst_labels, 0.7)
+#     createConfusionMatrix(model, f'{mname}_full', train_data, train_labels, 0.7)
+
 # ts = 0.7, do = 0, kc = 5, ne = 100, sb = 6
 ts, do, kc, ne, sb = 0.7, 0, 5, 150, 6
-for llstm in layers_LSTM:
-    for ulstm in units_LSTM:
-        for lblstm in lookback_LSTM:
-            for ld in layers_Dense:
-                for ud in units_Dense:
-                    createNewModel(training_data, training_labels, test_data, test_labels,
-                                   ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb)
+# for llstm in layers_LSTM:
+#     for ulstm in units_LSTM:
+#         for lblstm in lookback_LSTM:
+#             for ld in layers_Dense:
+#                 for ud in units_Dense:
+#                     createNewModel(training_data, training_labels, test_data, test_labels,
+#                                    ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb)
 
 
-# for ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb in zip(thresholds, layers_LSTM, units_LSTM, lookback_LSTM, dropout,
-#                                                             kernel_constraints, layers_Dense, units_Dense, num_epoch,
-#                                                             size_batch):
-#     createNewModel(training_data, training_labels, test_data, test_labels,
-#                    ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb)
 
-# model = keras.models.load_model('models/3DenselayersPrecision150e10b.keras')
-# model.evaluate(training_data, training_labels)
-
-# model = keras.models.load_model('models/1LSTM_RSF_2Dense_150e10b.keras')
-# model.evaluate(test_data, test_labels)
-
-# model = keras.models.load_model('models/2LSTM_RST_2Dense_150e10b.keras')
-# model.evaluate(test_data, test_labels)
-
-# model = model4()
-# model = keras.models.load_model('models/1LSTM_RSF_Drop_2Dense_150e10b.keras')
-# model.evaluate(test_data, test_labels)
-# createConfusionMatrix(model, 'model4b', test_data, test_labels)
-
-# model = model5()
-# model = keras.models.load_model('models/1LSTM_RSF_2Dense_250e10b.keras')
-# model.evaluate(test_data, test_labels)
-# createConfusionMatrix(model, 'model5', test_data)
-#
-# model = model6()
-# # model = keras.models.load_model('models/2LSTM_RST_Drop_2Dense_250e10b.keras')
-# model.evaluate(test_data, test_labels)
-# createConfusionMatrix(model, 'model6', test_data)
-
-# model = model7()
-# model = keras.models.load_model('models/2LSTM_RST_Drop_3Dense_250e10bV2.keras')
-# model.evaluate(test_data, test_labels)
-# createConfusionMatrix(model, 'model7b', test_data, test_labels)
-
-# model = model8()
-# model = keras.models.load_model('models/1LSTM_RSF_3Dense_250e10b.keras')
-# model.evaluate(test_data, test_labels)
-# training_data, training_labels = create3dDataset(training_data, training_labels, 2)
-# createConfusionMatrix(model, 'model8b', test_data, test_labels)
-
-# model = model9()
-# model = keras.models.load_model('models/3LSTM_RSF_2Dense_200e10b.keras')
-# model.evaluate(test_data, test_labels)
-# createConfusionMatrix(model, 'model9t09', test_data, test_labels)
-
-# model = model10()
-# model = keras.models.load_model('models/3_32LSTM_RST_2Dense_200e10b.keras')
-# model.evaluate(test_data, test_labels)
-# createConfusionMatrix(model, 'model10t09', test_data, test_labels)
-
-# model = model11()
-# model.evaluate(test_data, test_labels)
-# createConfusionMatrix(model, 'model11t08', test_data, test_labels, 0.8)
-
-# model = model12(training_data, training_labels)
-# model = keras.models.load_model('models/1LSTM_KC3_RSF_2Dense_150e6b_lb1.keras')
-# model.evaluate(test_data, test_labels)
-# createConfusionMatrix(model, 'model12t09_lb1', test_data, test_labels, 0.9)
-
-# model = model13(training_data, training_labels)
-# model.evaluate(test_data, test_labels)
-# model = keras.models.load_model('models/2LSTM_KC3_RST_2Dense_150e6b_lb1.keras')
-# createConfusionMatrix(model, 'model13t095_lb1', test_data, test_labels, 0.95)
-
-# model = model14(training_data, training_labels)
-# createConfusionMatrix(model, 'model14t095_lb1', test_data, test_labels, 0.95)
-
-# model = model15(training_data, training_labels)
-# model = keras.models.load_model('models/1LSTM_KC3_RSF_3_16Dense_150e3b_lb2.keras')
-# createConfusionMatrix(model, 'model15t01_lb2', test_data, test_labels, 1)
-# for layer in model.layers:
-#     print(layer.get_weights())
-
-# model = model16(training_data, training_labels)
-# createConfusionMatrix(model, 'model16t095', test_data, test_labels, 0.95)

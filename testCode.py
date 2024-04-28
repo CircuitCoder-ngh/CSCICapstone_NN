@@ -80,3 +80,75 @@
 #                          name='lines+markers'))
 # fig.show()
 
+# ----------------------------
+
+# model = keras.models.load_model('models/3DenselayersPrecision150e10b.keras')
+# model.evaluate(training_data, training_labels)
+
+# model = keras.models.load_model('models/1LSTM_RSF_2Dense_150e10b.keras')
+# model.evaluate(test_data, test_labels)
+
+# model = keras.models.load_model('models/2LSTM_RST_2Dense_150e10b.keras')
+# model.evaluate(test_data, test_labels)
+
+# model = model4()
+# model = keras.models.load_model('models/1LSTM_RSF_Drop_2Dense_150e10b.keras')
+# model.evaluate(test_data, test_labels)
+# createConfusionMatrix(model, 'model4b', test_data, test_labels)
+
+# model = model5()
+# model = keras.models.load_model('models/1LSTM_RSF_2Dense_250e10b.keras')
+# model.evaluate(test_data, test_labels)
+# createConfusionMatrix(model, 'model5', test_data)
+#
+# model = model6()
+# # model = keras.models.load_model('models/2LSTM_RST_Drop_2Dense_250e10b.keras')
+# model.evaluate(test_data, test_labels)
+# createConfusionMatrix(model, 'model6', test_data)
+
+# model = model7()
+# model = keras.models.load_model('models/2LSTM_RST_Drop_3Dense_250e10bV2.keras')
+# model.evaluate(test_data, test_labels)
+# createConfusionMatrix(model, 'model7b', test_data, test_labels)
+
+# model = model8()
+# model = keras.models.load_model('models/1LSTM_RSF_3Dense_250e10b.keras')
+# model.evaluate(test_data, test_labels)
+# training_data, training_labels = create3dDataset(training_data, training_labels, 2)
+# createConfusionMatrix(model, 'model8b', test_data, test_labels)
+
+# model = model9()
+# model = keras.models.load_model('models/3LSTM_RSF_2Dense_200e10b.keras')
+# model.evaluate(test_data, test_labels)
+# createConfusionMatrix(model, 'model9t09', test_data, test_labels)
+
+# model = model10()
+# model = keras.models.load_model('models/3_32LSTM_RST_2Dense_200e10b.keras')
+# model.evaluate(test_data, test_labels)
+# createConfusionMatrix(model, 'model10t09', test_data, test_labels)
+
+# model = model11()
+# model.evaluate(test_data, test_labels)
+# createConfusionMatrix(model, 'model11t08', test_data, test_labels, 0.8)
+
+# model = model12(training_data, training_labels)
+# model = keras.models.load_model('models/1LSTM_KC3_RSF_2Dense_150e6b_lb1.keras')
+# model.evaluate(test_data, test_labels)
+# createConfusionMatrix(model, 'model12t09_lb1', test_data, test_labels, 0.9)
+
+# model = model13(training_data, training_labels)
+# model.evaluate(test_data, test_labels)
+# model = keras.models.load_model('models/2LSTM_KC3_RST_2Dense_150e6b_lb1.keras')
+# createConfusionMatrix(model, 'model13t095_lb1', test_data, test_labels, 0.95)
+
+# model = model14(training_data, training_labels)
+# createConfusionMatrix(model, 'model14t095_lb1', test_data, test_labels, 0.95)
+
+# model = model15(training_data, training_labels)
+# model = keras.models.load_model('models/1LSTM_KC3_RSF_3_16Dense_150e3b_lb2.keras')
+# createConfusionMatrix(model, 'model15t01_lb2', test_data, test_labels, 1)
+# for layer in model.layers:
+#     print(layer.get_weights())
+
+# model = model16(training_data, training_labels)
+# createConfusionMatrix(model, 'model16t095', test_data, test_labels, 0.95)
