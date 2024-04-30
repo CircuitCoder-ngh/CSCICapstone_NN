@@ -257,7 +257,7 @@ def createConfusionMatrix(model, model_name, t_data, t_labels, threshold):
 
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
-    plt.savefig(f'models/groupB2_test/{model_name}CM.png')
+    plt.savefig(f'models/groupB1_aprilTest/{model_name}CM.png')
     plt.close()
     # plt.show()
 
@@ -392,6 +392,34 @@ training_labels = csvToArray('historical_data/SPY5min14_april_TrainingLabels0.2.
 # num_epoch = [50, 100, 150, 200]
 # size_batch = [3, 6, 12, 24]
 
+# ------ created groupB1 to compare to groupB2 -------- #
+# for item in groupB_testResultsOver60.csv, load model, test it on april data,
+# data = csvToList('groupB_testResultsOver60.csv')
+# groupresults = []
+# for item in data:
+#
+#     model = keras.models.load_model(f'models/groupB/{item[0]}')
+#     config = model.get_config()  # Returns pretty much every information about your model
+#     in_shape = config["layers"][0]["config"]["batch_input_shape"]
+#     # print(in_shape)  # returns a tuple of width, height and channels
+#     train_data, train_labels = training_data, training_labels
+#     if len(in_shape) > 2:
+#         train_data, train_labels = create3dDataset(training_data, training_labels, in_shape[1])
+#     createConfusionMatrix(model, f'{item[0][:-6]}_april', train_data, train_labels, 0.7)
+#     # evaluate model and save results to array
+#     train_prec = model.evaluate(train_data, train_labels)
+#     groupresults.append([item[0], train_prec])
+# # Create a DataFrame from the combined list
+# df = pd.DataFrame(groupresults)
+#
+# # Specify the CSV file path (adjust as needed)
+# csv_file_path = f'groupB1_aprilresults.csv'
+#
+# # Write the DataFrame to the CSV file
+# df.to_csv(csv_file_path, index=False)
+#
+# print(f"Data saved to {csv_file_path}")
+# -------------------------------------------- #
 
 def plotGroupResults(filename):
     """get results from csv and plot in graph"""
