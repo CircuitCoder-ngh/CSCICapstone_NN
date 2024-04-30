@@ -114,7 +114,7 @@ def getMACD(symbol, interval, signal_period, outputsize, fast_period, slow_perio
     return response.json()
 
 
-def combineDataToCSV(symbol, interval, outputsize, time_period):
+def combineDataToCSV(symbol, interval, outputsize, time_period, optional=None):
     """Performs API call to retrieve price and indicator values, combines
     all the data into a list and writes it out to a new CSV"""
     data_price = getTimeSeries(symbol=symbol, interval=interval, outputsize=outputsize)
@@ -152,7 +152,7 @@ def combineDataToCSV(symbol, interval, outputsize, time_period):
     df = pd.DataFrame(combined_list)
 
     # Specify the CSV file path (adjust as needed)
-    csv_file_path = f'{symbol}{interval}{time_period}.csv'
+    csv_file_path = f'historical_data/{symbol}{interval}{time_period}{optional}.csv'
 
     # Write the DataFrame to the CSV file
     df.to_csv(csv_file_path, index=False)
@@ -257,7 +257,7 @@ def createConfusionMatrix(model, model_name, t_data, t_labels, threshold):
 
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
-    plt.savefig(f'models/groupB2cm/{model_name}CM.png')
+    plt.savefig(f'models/groupB2_test/{model_name}CM.png')
     plt.close()
     # plt.show()
 
@@ -322,7 +322,7 @@ def createNewModel(train_data, train_labels, test_data, test_labels,
     createConfusionMatrix(model, f'{model_name}_full', train_data, train_labels, ts)
 
 
-def testResultsCSV(group):
+def testResultsCSV(group, training_data, training_labels, test_data, test_labels, optional=None):
     """reads in all models from models/{group} and evaluates them on training and test data
     saves results in a csv"""
     path = f"models/{group}"
@@ -343,57 +343,58 @@ def testResultsCSV(group):
                 tst_data, tst_labels = create3dDataset(test_data, test_labels, in_shape[1])
 
             # evaluate model and save results to array
-            train_prec = model.evaluate(train_data, train_labels)
-            test_prec = model.evaluate(tst_data, tst_labels)
-            groupresults.append([file, train_prec, test_prec])
+            # train_prec = model.evaluate(train_data, train_labels)
+            # test_prec = model.evaluate(tst_data, tst_labels)
+            # groupresults.append([file, train_prec, test_prec])
+            createConfusionMatrix(model, f'{file[:-6]}{optional}', train_data, train_labels, 0.7)
 
     # Create a DataFrame from the combined list
     df = pd.DataFrame(groupresults)
 
     # Specify the CSV file path (adjust as needed)
-    csv_file_path = f'{group}results.csv'
+    csv_file_path = f'{group}{optional}results.csv'
 
     # Write the DataFrame to the CSV file
-    df.to_csv(csv_file_path, index=False)
+    # df.to_csv(csv_file_path, index=False)
 
     print(f"Data saved to {csv_file_path}")
 
 
-# maybe create a fn that creates models based off the params I am changing
-# def create_new_model(train_data, train_labels,
-
-# combineDataToCSV(symbol="SPY", outputsize="5000", interval="5min", time_period="14")
-# createTrainingLabelCSV('SPY5min14.csv', 0.2)
-# normalizeListToCSV('SPY5min14.csv')
-training_data = csvToArray('SPY5min14_Normalized.csv')[:-12]
+# combineDataToCSV(symbol="SPY", outputsize="2000", interval="5min", time_period="14", optional="_april")
+# createTrainingLabelCSV('historical_data/SPY5min14_april.csv', 0.2)
+# normalizeListToCSV('historical_data/SPY5min14_april.csv')
+training_data = csvToArray('historical_data/SPY5min14_april_Normalized.csv')[:-12]
 training_data = np.delete(training_data, 4, axis=1)  # removes 'open'
 training_data = np.delete(training_data, 3, axis=1)  # removes 'low'
 training_data = np.delete(training_data, 2, axis=1)  # removes 'high'
-training_labels = csvToArray('SPY5min14.csv_TrainingLabels0.2.csv')[:-12]
+training_labels = csvToArray('historical_data/SPY5min14_april_TrainingLabels0.2.csv')[:-12]
 
-full_t_data = training_data
-full_l_data = training_labels
-test_size = int(len(training_data) * 0.8)
-test_data = training_data[test_size:]
-test_labels = training_labels[test_size:]
-training_data = training_data[:test_size]  # added after model8 created
-training_labels = training_labels[:test_size]  # added after model8 created
-# test_data, test_labels = create3dDataset(test_data, test_labels, 2)
+# testResultsCSV('groupB2', training_data, training_labels, training_data, training_labels, optional='_april')
 
-thresholds = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
-layers_LSTM = [3]  # [1, 2, 3]  # [0, 1, 2, 3]
-units_LSTM = [64]  # [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
-lookback_LSTM = [3]  # [1, 2, 3]
-dropout = [0, 0.1, 0.2, 0.4, 0.8]
-kernel_constraints = [None, 5, 2.5, 1]
-layers_Dense = [2, 3, 4]  # [1, 2, 3, 4]
-units_Dense = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
-num_epoch = [50, 100, 150, 200]
-size_batch = [3, 6, 12, 24]
+#
+# full_t_data = training_data
+# full_l_data = training_labels
+# test_size = int(len(training_data) * 0.8)
+# test_data = training_data[test_size:]
+# test_labels = training_labels[test_size:]
+# training_data = training_data[:test_size]  # added after model8 created
+# training_labels = training_labels[:test_size]  # added after model8 created
+## test_data, test_labels = create3dDataset(test_data, test_labels, 2)
+
+# thresholds = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
+# layers_LSTM = [3]  # [1, 2, 3]  # [0, 1, 2, 3]
+# units_LSTM = [64]  # [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
+# lookback_LSTM = [3]  # [1, 2, 3]
+# dropout = [0, 0.1, 0.2, 0.4, 0.8]
+# kernel_constraints = [None, 5, 2.5, 1]
+# layers_Dense = [2, 3, 4]  # [1, 2, 3, 4]
+# units_Dense = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
+# num_epoch = [50, 100, 150, 200]
+# size_batch = [3, 6, 12, 24]
 
 
 def plotGroupResults(filename):
-    # get results from csv and plot in graph
+    """get results from csv and plot in graph"""
     x = []
     tstp_y = []
     tstl_y = []
@@ -459,7 +460,7 @@ def plotGroupResults(filename):
 #     createConfusionMatrix(model, f'{mname}_full', train_data, train_labels, 0.7)
 
 # ts = 0.7, do = 0, kc = 5, ne = 100, sb = 6
-ts, do, kc, ne, sb = 0.7, 0, 5, 150, 6
+# ts, do, kc, ne, sb = 0.7, 0, 5, 150, 6
 # for llstm in layers_LSTM:
 #     for ulstm in units_LSTM:
 #         for lblstm in lookback_LSTM:
