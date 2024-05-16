@@ -13,105 +13,7 @@ from keras.models import Sequential
 from keras.layers import Dense, LSTM, Dropout
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from keras.constraints import max_norm
-
-
-def getAvailableIndicators():
-    url = "https://twelve-data1.p.rapidapi.com/technical_indicators"
-
-    headers = {
-        "X-RapidAPI-Key": "9778901d6amsh21cb41746d38e0cp18a259jsn700a0307ed38",
-        "X-RapidAPI-Host": "twelve-data1.p.rapidapi.com"
-    }
-
-    response = requests.get(url, headers=headers)
-
-    print(response.status_code)
-    return response.json()
-
-
-def getTimeSeries(symbol, interval, outputsize):
-    url = "https://twelve-data1.p.rapidapi.com/time_series"
-
-    querystring = {"symbol": symbol, "interval": interval, "outputsize": outputsize, "format": "json"}
-
-    headers = {
-        "X-RapidAPI-Key": "9778901d6amsh21cb41746d38e0cp18a259jsn700a0307ed38",
-        "X-RapidAPI-Host": "twelve-data1.p.rapidapi.com"
-    }
-
-    response = requests.get(url, headers=headers, params=querystring)
-
-    print(response.status_code)
-    return response.json()
-
-
-def getATR(interval, symbol, time_period, outputsize):
-    url = "https://twelve-data1.p.rapidapi.com/atr"
-
-    querystring = {"interval": interval, "symbol": symbol, "time_period": time_period, "outputsize": outputsize,
-                   "format": "json"}
-
-    headers = {
-        "X-RapidAPI-Key": "9778901d6amsh21cb41746d38e0cp18a259jsn700a0307ed38",
-        "X-RapidAPI-Host": "twelve-data1.p.rapidapi.com"
-    }
-
-    response = requests.get(url, headers=headers, params=querystring)
-
-    print(response.status_code)
-    return response.json()
-
-
-def getOBV(symbol, interval, outputsize):
-    url = "https://twelve-data1.p.rapidapi.com/obv"
-
-    querystring = {"symbol": symbol, "interval": interval, "format": "json", "outputsize": outputsize,
-                   "series_type": "close"}
-
-    headers = {
-        "X-RapidAPI-Key": "9778901d6amsh21cb41746d38e0cp18a259jsn700a0307ed38",
-        "X-RapidAPI-Host": "twelve-data1.p.rapidapi.com"
-    }
-
-    response = requests.get(url, headers=headers, params=querystring)
-
-    print(response.status_code)
-    return response.json()
-
-
-def getRSI(symbol, interval, time_period, outputsize):
-    url = "https://twelve-data1.p.rapidapi.com/rsi"
-
-    querystring = {"interval": interval, "symbol": symbol, "format": "json", "time_period": time_period,
-                   "series_type": "close",
-                   "outputsize": outputsize}
-
-    headers = {
-        "X-RapidAPI-Key": "9778901d6amsh21cb41746d38e0cp18a259jsn700a0307ed38",
-        "X-RapidAPI-Host": "twelve-data1.p.rapidapi.com"
-    }
-
-    response = requests.get(url, headers=headers, params=querystring)
-
-    print(response.status_code)
-    return response.json()
-
-
-def getMACD(symbol, interval, signal_period, outputsize, fast_period, slow_period):
-    url = "https://twelve-data1.p.rapidapi.com/macd"
-
-    querystring = {"interval": interval, "symbol": symbol, "signal_period": signal_period, "outputsize": outputsize,
-                   "series_type": "close", "fast_period": fast_period, "slow_period": slow_period, "format": "json"}
-
-    headers = {
-        "X-RapidAPI-Key": "9778901d6amsh21cb41746d38e0cp18a259jsn700a0307ed38",
-        "X-RapidAPI-Host": "twelve-data1.p.rapidapi.com"
-    }
-
-    response = requests.get(url, headers=headers, params=querystring)
-
-    print(response.status_code)
-    return response.json()
+from apiCalls import *
 
 
 def combineDataToCSV(symbol, interval, outputsize, time_period, optional=None):
@@ -153,6 +55,54 @@ def combineDataToCSV(symbol, interval, outputsize, time_period, optional=None):
 
     # Specify the CSV file path (adjust as needed)
     csv_file_path = f'historical_data/{symbol}{interval}{time_period}{optional}.csv'
+
+    # Write the DataFrame to the CSV file
+    df.to_csv(csv_file_path, index=False)
+
+    print(f"Data saved to {csv_file_path}")
+
+
+def combineDataToCSV_AV(symbol, interval, month, time_period, optional=None):
+    """Performs API call to retrieve price and indicator values, combines
+    all the data into a list and writes it out to a new CSV"""
+    data_price = getTimeSeries_AV(symbol=symbol, interval=interval, month=month)
+    data_rsi = getRSI_AV(symbol=symbol, interval=interval, time_period=time_period, month=month)
+    data_obv = getOBV_AV(symbol=symbol, interval=interval, month=month)
+    data_atr = getATR_AV(symbol=symbol, interval=interval, time_period=time_period, month=month)
+    data_macd = getMACD_AV(symbol=symbol, interval=interval, month=month,
+                           signal_period=9, slow_period=26, fast_period=12)
+
+    # Initialize the combined list
+    combined_list = []
+
+    # Merge indicator values
+    for sample_rsi, sample_obv, sample_atr, sample_macd, sample_price \
+            in zip(data_rsi['Technical Analysis: RSI'], data_obv['Technical Analysis: OBV'],
+                   data_atr['Technical Analysis: ATR'], data_macd['Technical Analysis: MACDEXT'],
+                   data_price[f'Time Series ({interval})']):
+        combined_sample = {
+            'datetime': sample_price,  # other fn's depend on datetime at loc[0], and close at loc[1]
+            'close': data_price[f'Time Series ({interval})'][sample_price]['4. close'],
+            'open': data_price[f'Time Series ({interval})'][sample_price]['1. open'],
+            'high': data_price[f'Time Series ({interval})'][sample_price]['2. high'],
+            'low': data_price[f'Time Series ({interval})'][sample_price]['3. low'],
+            'vol': data_price[f'Time Series ({interval})'][sample_price]['5. volume'],
+            'obv': data_obv['Technical Analysis: OBV'][sample_obv]['OBV'],
+            'rsi': data_rsi['Technical Analysis: RSI'][sample_rsi]['RSI'],
+            'atr': data_atr['Technical Analysis: ATR'][sample_atr]['ATR'],
+            'macd': data_macd['Technical Analysis: MACDEXT'][sample_macd]['MACD']
+        }
+        combined_list.append(combined_sample)
+        print(f'{sample_price}, {sample_obv}, {sample_rsi}, {sample_atr}, {sample_macd}')
+
+    # puts list in chronological order (loc[0] is oldest, loc[i] is most recent
+    combined_list = reverse_list(combined_list)
+
+    # Create a DataFrame from the combined list
+    df = pd.DataFrame(combined_list)
+
+    # Specify the CSV file path (adjust as needed) # removed {optional} from end of filepath
+    csv_file_path = f'historical_data/{symbol}{interval}_raw/{symbol}{interval}{time_period}_{month}.csv'
 
     # Write the DataFrame to the CSV file
     df.to_csv(csv_file_path, index=False)
@@ -205,7 +155,7 @@ def createTrainingLabelCSV(filename, profit_target):  # profit_target inputted a
                 training_labels.append(2)
 
     df_labels = pd.DataFrame(training_labels)
-    csv_file_path = f'{filename[:-4]}_TrainingLabels{profit_target}.csv'
+    csv_file_path = f'historical_data/{filename[:-4]}_TrainingLabels{profit_target}.csv'
     df_labels.to_csv(csv_file_path, index=False)
 
     print(f"Training labels saved to {csv_file_path}")
@@ -227,7 +177,7 @@ def normalizeListToCSV(filename):
     scaled_data = scaler.fit_transform(dataset)
     df_scaled_data = pd.DataFrame(scaled_data)
 
-    csv_file_path = f'{filename[:-4]}_Normalized.csv'
+    csv_file_path = f'historical_data/{filename[:-4]}_Normalized.csv'
     df_scaled_data.to_csv(csv_file_path, index=False)
 
     print(f"Normalized data saved to {csv_file_path}")
@@ -245,7 +195,7 @@ def listToCSV(array, file_path):
     print(f"Data saved to {file_path}")
 
 
-def createConfusionMatrix(model, model_name, t_data, t_labels, threshold):
+def createConfusionMatrix(model, model_name, test_name, t_data, t_labels, threshold):
     """Creates and saves a confusion matrix
     Parameters: model, a chosen name for the model, and test data appropriate for the model"""
     predictions = model.predict(t_data)
@@ -257,7 +207,7 @@ def createConfusionMatrix(model, model_name, t_data, t_labels, threshold):
 
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
-    plt.savefig(f'models/groupB1_aprilTest/{model_name}CM.png')
+    plt.savefig(f'models/{test_name}/{model_name}CM.png')
     plt.close()
     # plt.show()
 
@@ -363,11 +313,12 @@ def testResultsCSV(group, training_data, training_labels, test_data, test_labels
 # combineDataToCSV(symbol="SPY", outputsize="2000", interval="5min", time_period="14", optional="_april")
 # createTrainingLabelCSV('historical_data/SPY5min14_april.csv', 0.2)
 # normalizeListToCSV('historical_data/SPY5min14_april.csv')
-training_data = csvToArray('historical_data/SPY5min14_april_Normalized.csv')[:-12]
-training_data = np.delete(training_data, 4, axis=1)  # removes 'open'
-training_data = np.delete(training_data, 3, axis=1)  # removes 'low'
-training_data = np.delete(training_data, 2, axis=1)  # removes 'high'
-training_labels = csvToArray('historical_data/SPY5min14_april_TrainingLabels0.2.csv')[:-12]
+# training_data = csvToArray('historical_data/SPY5min14_april_Normalized.csv')[:-12]
+# training_data = np.delete(training_data, 4, axis=1)  # removes 'open'
+# training_data = np.delete(training_data, 3, axis=1)  # removes 'low'
+# training_data = np.delete(training_data, 2, axis=1)  # removes 'high'
+# training_labels = csvToArray('historical_data/SPY5min14_april_TrainingLabels0.2.csv')[:-12]
+
 
 # testResultsCSV('groupB2', training_data, training_labels, training_data, training_labels, optional='_april')
 
@@ -497,5 +448,17 @@ def plotGroupResults(filename):
 #                     createNewModel(training_data, training_labels, test_data, test_labels,
 #                                    ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb)
 
+# for loop creating raw csv data for each month 2021-2023
+years = [2021, 2022, 2023]
+months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
+for yr in years:
+    for m in months:
+        combineDataToCSV_AV(symbol='SPY', interval='5min', month=f'{yr}-{m}', time_period=14)
 
-
+# data_macd = getMACD_AV(symbol='SPY', interval='5min', month='2021-02',
+#                        signal_period=9, slow_period=26, fast_period=12)  # print(data_rsi)
+# print('--------------')
+# for item in data_macd:
+#     print(f'item == {item}')
+#     # print(data_rsi[item]['RSI'])
+#     print(data_macd['Technical Analysis: MACDEXT'][item]['MACD'])

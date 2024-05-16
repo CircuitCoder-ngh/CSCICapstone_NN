@@ -37,7 +37,7 @@ def model2(training_data, training_labels):
     model = Sequential()
     # Add an LSTM layer (adjust units and other hyperparameters)
     model.add(LSTM(50, activation='relu', input_shape=(train_x.shape[1], train_x.shape[2]),
-                   return_sequences=False))  # TODO: compare RSF to RST
+                   return_sequences=False))
 
     # Add a dropout layer
     # model.add(Dropout(0.2))
@@ -136,9 +136,9 @@ def model5(training_data, training_labels):
 
 
 def model6(training_data, training_labels):
+
     train_x, train_y = create3dDataset(training_data, training_labels, 2)
 
-    # performance_simple = customCallbacks.PerformancePlotCallback(train_x, train_y, '1LSTM_RSF_2Dense_150e10b')
     model = Sequential()
     # Add an LSTM layer (adjust units and other hyperparameters)
     model.add(LSTM(50, activation='relu', input_shape=(train_x.shape[1], train_x.shape[2]),
