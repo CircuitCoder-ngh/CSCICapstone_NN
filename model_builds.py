@@ -6,7 +6,7 @@ import customCallbacks
 import numpy as np
 from keras.constraints import max_norm
 
-from main import create3dDataset
+from mainCode import create3dDataset
 
 
 def model1(training_data, training_labels):
