@@ -271,7 +271,9 @@ def createNewModel(group_name, train_data, train_labels, test_data, test_labels,
     model_name = f'{ts}_{llstm}_{ulstm}_{lblstm}_{do}_{kc}_{ld}_{ud}_{ne}_{sb}'
     model.save(f'models/{group_name}/{model_name}.keras')
 
+    print(model_name)
     model.evaluate(test_data, test_labels)
+    print('------------------')
     createConfusionMatrix(model, model_name, group_name, test_data, test_labels, ts)
     createConfusionMatrix(model, f'{model_name}_full', group_name, train_data, train_labels, ts)
 
@@ -435,7 +437,7 @@ def plotGroupResults(filename):
 
 
 # -------------- creation of groupC -------------- #
-data = csvToArray('historical_data/SPY5min_20to23_Normalized.csv.csv')[:-12]
+data = csvToArray('historical_data/SPY5min_20to23_Normalized.csv')[:-12]
 data = np.delete(data, 4, axis=1)  # removes 'open'
 data = np.delete(data, 3, axis=1)  # removes 'low'
 data = np.delete(data, 2, axis=1)  # removes 'high'
