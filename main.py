@@ -155,7 +155,8 @@ def createTrainingLabelCSV(filename, profit_target):  # profit_target inputted a
                 training_labels.append(2)
 
     df_labels = pd.DataFrame(training_labels)
-    csv_file_path = f'historical_data/{filename[:-4]}_TrainingLabels{profit_target}.csv'
+    # csv_file_path = f'historical_data/{filename[:-4]}_TrainingLabels{profit_target}.csv'
+    csv_file_path = f'historical_data/SPY5min_20to23_TrainingLabels{profit_target}.csv'
     df_labels.to_csv(csv_file_path, index=False)
 
     print(f"Training labels saved to {csv_file_path}")
@@ -177,7 +178,8 @@ def normalizeListToCSV(filename):
     scaled_data = scaler.fit_transform(dataset)
     df_scaled_data = pd.DataFrame(scaled_data)
 
-    csv_file_path = f'historical_data/{filename[:-4]}_Normalized.csv'
+    # csv_file_path = f'historical_data/{filename[:-4]}_Normalized.csv'
+    csv_file_path = f'historical_data/SPY5min_20to23_Normalized.csv'
     df_scaled_data.to_csv(csv_file_path, index=False)
 
     print(f"Normalized data saved to {csv_file_path}")
@@ -195,9 +197,9 @@ def listToCSV(array, file_path):
     print(f"Data saved to {file_path}")
 
 
-def createConfusionMatrix(model, model_name, test_name, t_data, t_labels, threshold):
+def createConfusionMatrix(model, model_name, group_name, t_data, t_labels, threshold):
     """Creates and saves a confusion matrix
-    Parameters: model, a chosen name for the model, and test data appropriate for the model"""
+    Parameters: model, a chosen name for the model, the group name, and test data appropriate for the model"""
     predictions = model.predict(t_data)
 
     # Round to 0 or 1 based on the threshold
@@ -207,7 +209,7 @@ def createConfusionMatrix(model, model_name, test_name, t_data, t_labels, thresh
 
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
-    plt.savefig(f'models/{test_name}/{model_name}CM.png')
+    plt.savefig(f'models/{group_name}cm/{model_name}CM.png')
     plt.close()
     # plt.show()
 
@@ -235,10 +237,10 @@ def create3dDataset(dataset, data_labels, look_back):  # look_back must be 1 w/ 
     return dataX, dataY
 
 
-def createNewModel(train_data, train_labels, test_data, test_labels,
+def createNewModel(group_name, train_data, train_labels, test_data, test_labels,
                    ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb):
-    """Assumes input shape of 7
-    error: ld label is ld-=1 if llstm > 0"""
+    """Creates a new model based on the inputted parameters
+    error(fixed after groupB and B2): ld label is ld-=1 if llstm == 0"""
 
     model = Sequential()
 
@@ -254,22 +256,24 @@ def createNewModel(train_data, train_labels, test_data, test_labels,
     if do > 0:
         model.add(Dropout(do))
 
-    if llstm == 0:
-        model.add(Dense(ud, input_shape=(7,), activation='relu'))  # TODO: replace 7 w/ train_x.shape[_]
+    if llstm == 0:  # creates an input dense layer if no there is no lstm input
+        model.add(Dense(ud, input_shape=(train_data.shape[1],), activation='relu'))
         ld -= 1
     for i in range(ld - 1):
         model.add(Dense(ud, activation='relu'))
+    if llstm == 0:
+        ld += 1
 
     model.add(Dense(1, activation='sigmoid'))
 
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=[keras.metrics.Precision()])
     model.fit(train_data, train_labels, epochs=ne, batch_size=sb)
     model_name = f'{ts}_{llstm}_{ulstm}_{lblstm}_{do}_{kc}_{ld}_{ud}_{ne}_{sb}'
-    model.save(f'models/groupB/{model_name}.keras')
+    model.save(f'models/{group_name}/{model_name}.keras')
 
     model.evaluate(test_data, test_labels)
-    createConfusionMatrix(model, model_name, test_data, test_labels, ts)
-    createConfusionMatrix(model, f'{model_name}_full', train_data, train_labels, ts)
+    createConfusionMatrix(model, model_name, group_name, test_data, test_labels, ts)
+    createConfusionMatrix(model, f'{model_name}_full', group_name, train_data, train_labels, ts)
 
 
 def testResultsCSV(group, training_data, training_labels, test_data, test_labels, optional=None):
@@ -310,70 +314,8 @@ def testResultsCSV(group, training_data, training_labels, test_data, test_labels
     print(f"Data saved to {csv_file_path}")
 
 
-# combineDataToCSV(symbol="SPY", outputsize="2000", interval="5min", time_period="14", optional="_april")
-# createTrainingLabelCSV('historical_data/SPY5min14_april.csv', 0.2)
-# normalizeListToCSV('historical_data/SPY5min14_april.csv')
-# training_data = csvToArray('historical_data/SPY5min14_april_Normalized.csv')[:-12]
-# training_data = np.delete(training_data, 4, axis=1)  # removes 'open'
-# training_data = np.delete(training_data, 3, axis=1)  # removes 'low'
-# training_data = np.delete(training_data, 2, axis=1)  # removes 'high'
-# training_labels = csvToArray('historical_data/SPY5min14_april_TrainingLabels0.2.csv')[:-12]
-
-
-# testResultsCSV('groupB2', training_data, training_labels, training_data, training_labels, optional='_april')
-
-#
-# full_t_data = training_data
-# full_l_data = training_labels
-# test_size = int(len(training_data) * 0.8)
-# test_data = training_data[test_size:]
-# test_labels = training_labels[test_size:]
-# training_data = training_data[:test_size]  # added after model8 created
-# training_labels = training_labels[:test_size]  # added after model8 created
-## test_data, test_labels = create3dDataset(test_data, test_labels, 2)
-
-# thresholds = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
-# layers_LSTM = [3]  # [1, 2, 3]  # [0, 1, 2, 3]
-# units_LSTM = [64]  # [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
-# lookback_LSTM = [3]  # [1, 2, 3]
-# dropout = [0, 0.1, 0.2, 0.4, 0.8]
-# kernel_constraints = [None, 5, 2.5, 1]
-# layers_Dense = [2, 3, 4]  # [1, 2, 3, 4]
-# units_Dense = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
-# num_epoch = [50, 100, 150, 200]
-# size_batch = [3, 6, 12, 24]
-
-# ------ created groupB1 to compare to groupB2 -------- #
-# for item in groupB_testResultsOver60.csv, load model, test it on april data,
-# data = csvToList('groupB_testResultsOver60.csv')
-# groupresults = []
-# for item in data:
-#
-#     model = keras.models.load_model(f'models/groupB/{item[0]}')
-#     config = model.get_config()  # Returns pretty much every information about your model
-#     in_shape = config["layers"][0]["config"]["batch_input_shape"]
-#     # print(in_shape)  # returns a tuple of width, height and channels
-#     train_data, train_labels = training_data, training_labels
-#     if len(in_shape) > 2:
-#         train_data, train_labels = create3dDataset(training_data, training_labels, in_shape[1])
-#     createConfusionMatrix(model, f'{item[0][:-6]}_april', train_data, train_labels, 0.7)
-#     # evaluate model and save results to array
-#     train_prec = model.evaluate(train_data, train_labels)
-#     groupresults.append([item[0], train_prec])
-# # Create a DataFrame from the combined list
-# df = pd.DataFrame(groupresults)
-#
-# # Specify the CSV file path (adjust as needed)
-# csv_file_path = f'groupB1_aprilresults.csv'
-#
-# # Write the DataFrame to the CSV file
-# df.to_csv(csv_file_path, index=False)
-#
-# print(f"Data saved to {csv_file_path}")
-# -------------------------------------------- #
-
 def plotGroupResults(filename):
-    """get results from csv and plot in graph"""
+    """get results from csv and plot in graph (WIP: currently outputs blank png)"""
     x = []
     tstp_y = []
     tstl_y = []
@@ -412,8 +354,60 @@ def plotGroupResults(filename):
     # plt.close()
 
 
-# plotGroupResults('groupB_testResultsOver60.csv')
+# ------------- data prep for groupB -------------- #
+# combineDataToCSV(symbol="SPY", outputsize="2000", interval="5min", time_period="14", optional="_april")
+# createTrainingLabelCSV('historical_data/SPY5min14_april.csv', 0.2)
+# normalizeListToCSV('historical_data/SPY5min14_april.csv')
+# training_data = csvToArray('historical_data/SPY5min14_april_Normalized.csv')[:-12]
+# training_data = np.delete(training_data, 4, axis=1)  # removes 'open'
+# training_data = np.delete(training_data, 3, axis=1)  # removes 'low'
+# training_data = np.delete(training_data, 2, axis=1)  # removes 'high'
+# training_labels = csvToArray('historical_data/SPY5min14_april_TrainingLabels0.2.csv')[:-12]
 
+# testResultsCSV('groupB2', training_data, training_labels, training_data, training_labels, optional='_april')
+
+# full_t_data = training_data
+# full_l_data = training_labels
+# test_size = int(len(training_data) * 0.8)
+# test_data = training_data[test_size:]
+# test_labels = training_labels[test_size:]
+# training_data = training_data[:test_size]  # added after model8 created
+# training_labels = training_labels[:test_size]  # added after model8 created
+## test_data, test_labels = create3dDataset(test_data, test_labels, 2)
+# ----------------------------------------------------- #
+
+
+# ------ created groupB1 to compare to groupB2 -------- #
+# for item in groupB_testResultsOver60.csv, load model, test it on april data,
+# data = csvToList('groupB_testResultsOver60.csv')
+# groupresults = []
+# for item in data:
+#
+#     model = keras.models.load_model(f'models/groupB/{item[0]}')
+#     config = model.get_config()  # Returns pretty much every information about your model
+#     in_shape = config["layers"][0]["config"]["batch_input_shape"]
+#     # print(in_shape)  # returns a tuple of width, height and channels
+#     train_data, train_labels = training_data, training_labels
+#     if len(in_shape) > 2:
+#         train_data, train_labels = create3dDataset(training_data, training_labels, in_shape[1])
+#     createConfusionMatrix(model, f'{item[0][:-6]}_april', train_data, train_labels, 0.7)
+#     # evaluate model and save results to array
+#     train_prec = model.evaluate(train_data, train_labels)
+#     groupresults.append([item[0], train_prec])
+# # Create a DataFrame from the combined list
+# df = pd.DataFrame(groupresults)
+#
+# # Specify the CSV file path (adjust as needed)
+# csv_file_path = f'groupB1_aprilresults.csv'
+#
+# # Write the DataFrame to the CSV file
+# df.to_csv(csv_file_path, index=False)
+#
+# print(f"Data saved to {csv_file_path}")
+# --------------------------------------------------------------- #
+
+
+# ------------ Creation of groupB2 using best from groupB ------- #
 # list60 = csvToList('groupB_testResultsOver60.csv')
 # list60.pop(0)
 # for item in list60:
@@ -437,28 +431,75 @@ def plotGroupResults(filename):
 #     model.evaluate(tst_data, tst_labels)
 #     createConfusionMatrix(model, mname, tst_data, tst_labels, 0.7)
 #     createConfusionMatrix(model, f'{mname}_full', train_data, train_labels, 0.7)
+# ------------------------------------------------ #
 
-# ts = 0.7, do = 0, kc = 5, ne = 100, sb = 6
-# ts, do, kc, ne, sb = 0.7, 0, 5, 150, 6
-# for llstm in layers_LSTM:
-#     for ulstm in units_LSTM:
-#         for lblstm in lookback_LSTM:
-#             for ld in layers_Dense:
-#                 for ud in units_Dense:
-#                     createNewModel(training_data, training_labels, test_data, test_labels,
-#                                    ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb)
 
+# -------------- creation of groupC -------------- #
+data = csvToArray('historical_data/SPY5min_20to23_Normalized.csv.csv')[:-12]
+data = np.delete(data, 4, axis=1)  # removes 'open'
+data = np.delete(data, 3, axis=1)  # removes 'low'
+data = np.delete(data, 2, axis=1)  # removes 'high'
+data_labels = csvToArray('historical_data/SPY5min_20to23_TrainingLabels0.2.csv')[:-12]
+test_size = int(len(data) * 0.8)
+test_data = data[test_size:]
+test_labels = data_labels[test_size:]
+training_data = data[:test_size]
+training_labels = data_labels[:test_size]
+
+# thresholds = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
+layers_LSTM = [1, 2, 3]  # [0, 1, 2, 3]
+units_LSTM = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
+lookback_LSTM = [1, 2, 3, 6, 12]
+dropout = [0, 0.1, 0.2, 0.4, 0.8]
+# kernel_constraints = [None, 5, 2.5, 1]
+layers_Dense = [2, 3, 4]  # [1, 2, 3, 4]
+units_Dense = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
+# num_epoch = [50, 100, 150, 200]
+size_batch = [3, 6, 12, 24]
+
+ts, kc, ne = 0.7, 5, 150
+for llstm in layers_LSTM:
+    for ulstm in units_LSTM:
+        for lblstm in lookback_LSTM:
+            for do in dropout:
+                for ld in layers_Dense:
+                    for ud in units_Dense:
+                        for sb in size_batch:
+                            createNewModel('groupC', training_data, training_labels, test_data, test_labels,
+                                           ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb)
+print('GroupC has completed training!')
+# ------------------------------------------------------ #
+
+
+# ------------- data prep for groupC ------------------- #
 # for loop creating raw csv data for each month 2021-2023
-years = [2021, 2022, 2023]
-months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
-for yr in years:
-    for m in months:
-        combineDataToCSV_AV(symbol='SPY', interval='5min', month=f'{yr}-{m}', time_period=14)
+# years = [2021, 2022, 2023]
+# months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
+# for yr in years:
+#     for m in months:
+#         combineDataToCSV_AV(symbol='SPY', interval='5min', month=f'{yr}-{m}', time_period=14)
 
-# data_macd = getMACD_AV(symbol='SPY', interval='5min', month='2021-02',
-#                        signal_period=9, slow_period=26, fast_period=12)  # print(data_rsi)
-# print('--------------')
-# for item in data_macd:
-#     print(f'item == {item}')
-#     # print(data_rsi[item]['RSI'])
-#     print(data_macd['Technical Analysis: MACDEXT'][item]['MACD'])
+# combine csv files for dif months into single csv
+# df_csv_append = pd.DataFrame()
+# path = f"historical_data/SPY5min_raw"
+# dirs = os.listdir(path)
+# for file in dirs:
+#     if file.endswith(".csv"):
+#         df = pd.read_csv(f'historical_data/SPY5min_raw/{file}')
+#         df_csv_append = pd.concat([df_csv_append, df], ignore_index=True)
+# df_csv_append.to_csv(f'historical_data/SPY5min_rawCombined.csv', index=False)
+
+# filter out extended hours data
+# df = pd.read_csv('historical_data/SPY5min_rawCombined.csv')
+# # Convert the timestamp column to datetime
+# df['datetime'] = pd.to_datetime(df['datetime'])
+# # Filter rows between 09:30:00 and 16:00:00
+# filtered_df = df[(df['datetime'].dt.time >= pd.to_datetime('09:00:00').time()) &
+#                  (df['datetime'].dt.time <= pd.to_datetime('16:25:00').time())]
+# # Print the filtered DataFrame
+# filtered_df.to_csv(f'historical_data/SPY5min_rawCombinedFiltered.csv', index=False)
+
+# create training labels (save csv) -> normalize data (save csv) -> train groupB models w/ this
+# createTrainingLabelCSV('historical_data/SPY5min_rawCombinedFiltered.csv', 0.2)
+# normalizeListToCSV('historical_data/SPY5min_rawCombinedFiltered.csv')
+# --------------------------------------------------- #

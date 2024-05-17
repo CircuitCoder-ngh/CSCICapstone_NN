@@ -2,6 +2,7 @@ import requests
 
 
 apikey = 'Q9DV29LM9GZVHW7Z'
+# https://www.alphavantage.co/query?function=RSI&month=2020-01&series_type=open&symbol=SPY&interval=5min&time_period=14&apikey=Q9DV29LM9GZVHW7Z&outputsize=full&extended_hours=false
 
 
 def getAvailableIndicators():
@@ -128,7 +129,6 @@ def getRSI_AV(symbol, interval, time_period, month, series_type='close'):
           f'&month={month}&symbol={symbol}&interval={interval}&time_period={time_period}' \
           f'&series_type={series_type}&apikey={apikey}&outputsize=full'
 
-    # f'https://www.alphavantage.co/query?function=RSI&month=2020-01&symbol=SPY&interval=5min&time_period=14&apikey=5WO97LEWV7T392RT'
     response = requests.get(url)
 
     print(response.status_code)
