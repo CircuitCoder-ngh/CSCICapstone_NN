@@ -266,9 +266,56 @@ def createNewModel(group_name, train_data, train_labels, test_data, test_labels,
 
     model.add(Dense(1, activation='sigmoid'))
 
+    # TODO: test out accuracy vs precision
+    # model.compile(loss='binary_crossentropy', optimizer='adam', metrics=[keras.metrics.Precision()])
+    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=[keras.metrics.Accuracy()])
+    model.fit(train_data, train_labels, epochs=ne, batch_size=sb)
+    model_name = f'{ts}_{llstm}_{ulstm}_{lblstm}_{do}_{kc}_{ld}_{ud}_{ne}_{sb}_acc'
+    model.save(f'models/{group_name}/{model_name}.keras')
+
+    print(model_name)
+    model.evaluate(test_data, test_labels)
+    print('------------------')
+    createConfusionMatrix(model, model_name, group_name, test_data, test_labels, ts)
+    createConfusionMatrix(model, f'{model_name}_full', group_name, train_data, train_labels, ts)
+
+
+def createNewModel2(group_name, train_data, train_labels, test_data, test_labels,
+                   ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb):
+    """created for groupE, dense layer has 'n' neurons.
+    n = (train_data.shape[1] * train_data.shape[2] * ulstm)"""
+
+    model = Sequential()
+
+    if llstm > 0:
+        train_data, train_labels = create3dDataset(train_data, train_labels, lblstm)
+        test_data, test_labels = create3dDataset(test_data, test_labels, lblstm)
+        for i in range(llstm - 1):
+            model.add(LSTM(ulstm, activation='relu', input_shape=(train_data.shape[1], train_data.shape[2]),
+                           return_sequences=True, kernel_constraint=max_norm(kc)))
+        model.add(LSTM(ulstm, activation='relu', input_shape=(train_data.shape[1], train_data.shape[2]),
+                       return_sequences=False, kernel_constraint=max_norm(kc)))
+
+    if do > 0:
+        model.add(Dropout(do))
+
+    # if llstm == 0:  # creates an input dense layer if no there is no lstm input
+    #     model.add(Dense(ud, input_shape=(train_data.shape[1],), activation='relu'))
+    #     ld -= 1
+    # for i in range(ld - 2):
+    #     model.add(Dense(ud, activation='relu'))
+    # if llstm == 0:
+    #     ld += 1
+    #  adding fully connected dense layer w/ units == n
+    # n = ulstm * llstm * ld * ud
+    n = train_data.shape[1] * train_data.shape[2] * ulstm
+    model.add(Dense(n, activation='relu'))
+
+    model.add(Dense(1, activation='sigmoid'))
+
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=[keras.metrics.Precision()])
     model.fit(train_data, train_labels, epochs=ne, batch_size=sb)
-    model_name = f'{ts}_{llstm}_{ulstm}_{lblstm}_{do}_{kc}_{ld}_{ud}_{ne}_{sb}'
+    model_name = f'{ts}_{llstm}_{ulstm}_{lblstm}_{do}_{kc}_{ld}_fd_{ne}_{sb}'
     model.save(f'models/{group_name}/{model_name}.keras')
 
     print(model_name)
@@ -302,7 +349,7 @@ def testResultsCSV(group, training_data, training_labels, test_data, test_labels
             # train_prec = model.evaluate(train_data, train_labels)
             # test_prec = model.evaluate(tst_data, tst_labels)
             # groupresults.append([file, train_prec, test_prec])
-            createConfusionMatrix(model, f'{file[:-6]}{optional}', train_data, train_labels, 0.7)
+            createConfusionMatrix(model, f'{file[:-6]}{optional}', train_data, train_labels, 0.7)  # TODO: fix this
 
     # Create a DataFrame from the combined list
     df = pd.DataFrame(groupresults)
@@ -354,6 +401,26 @@ def plotGroupResults(filename):
     plt.show()
     # plt.savefig(f'models/groupBcm/GroupBTestDataPrecisionResults.png')  # fix this
     # plt.close()
+
+
+def testRetrainModels(group_name, training_data, training_labels, prec, r_period, optional=None):
+    """tests out models w/ precision > 'prec' within 'group_name' by retraining every 'r_period' samples"""
+    path = f"models/{group_name}"
+    dirs = os.listdir(path)
+    groupresults = []
+
+    for file in dirs:
+        if file.endswith(".keras"):
+            print(file)
+            model = keras.models.load_model(f'models/{group_name}/{file}')
+            if model prec > prec:
+                config = model.get_config()  # Returns pretty much every information about your model
+                in_shape = config["layers"][0]["config"]["batch_input_shape"]
+                print(in_shape)  # returns a tuple of width, height and channels
+                if len(in_shape) > 2:
+                    train_data, train_labels = create3dDataset(training_data, training_labels, in_shape[1])
+
+
 
 
 # ------------- data prep for groupB -------------- #
@@ -451,37 +518,50 @@ training_labels = data_labels[:test_size]
 # thresholds = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
 layers_LSTM = [1, 2, 3]  # [0, 1, 2, 3]
 units_LSTM = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
-lookback_LSTM = [3, 6, 12, 1, 2, 3]
+lookback_LSTM = [1, 2, 3]
 dropout = [0, 0.1, 0.2, 0.4, 0.8]
 # kernel_constraints = [None, 5, 2.5, 1]
 layers_Dense = [2, 3, 4]  # [1, 2, 3, 4]
 units_Dense = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
 # num_epoch = [50, 100, 150, 200]
 # size_batch = [6, 12, 24]
-i = 17
+i = 0  # 25
 j = 0
-createNewModel('groupC', training_data, training_labels, test_data, test_labels,
-                                           0.7, 3, 8, 2, 0, 5, 4, 64, 150, 6)
-createNewModel('groupC', training_data, training_labels, test_data, test_labels,
-                                           0.7, 1, 8, 3, 0, 10, 2, 8, 150, 6)
-createNewModel('groupC', training_data, training_labels, test_data, test_labels,
-                                           0.7, 3, 8, 6, 0, 10, 3, 64, 150, 3)
-ts, kc, ne, sb = 0.7, 5, 150, 6
+# createNewModel('groupC', training_data, training_labels, test_data, test_labels,
+#                                            0.7, 3, 8, 2, 0, 5, 4, 64, 150, 6)
+# createNewModel('groupC', training_data, training_labels, test_data, test_labels,
+#                                            0.7, 1, 8, 3, 0, 10, 2, 8, 150, 6)
+# createNewModel('groupC', training_data, training_labels, test_data, test_labels,
+#                                            0.7, 3, 8, 6, 0, 10, 3, 64, 150, 3)
+# createNewModel2('groupC', training_data, training_labels, test_data, test_labels,
+#                                            0.7, 1, 8, 3, 0, 10, 2, 8, 150, 6)
+# createNewModel('groupC', training_data, training_labels, test_data, test_labels,
+#                                            0.7, 1, 8, 3, 0, 10, 2, 8, 150, 6)
+ts, kc, ne, sb = 0.7, 10, 150, 12
+ld, ud = 1, 64
 for do in dropout:
-    for ulstm in units_LSTM:
-        for llstm in layers_LSTM:
+    for llstm in layers_LSTM:
+        for ulstm in units_LSTM:
             for lblstm in lookback_LSTM:
-                for ld in layers_Dense:
-                    for ud in units_Dense:
+                # for ld in layers_Dense:
+                #     for ud in units_Dense:
                         # for sb in size_batch:
-                        if j < i:
-                            j += 1
-                        else:
-                            createNewModel('groupC', training_data, training_labels, test_data, test_labels,
+                        # if j < i:
+                        #     j += 1
+                        # else:
+                            createNewModel2('groupE', training_data, training_labels, test_data, test_labels,
                                            ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb)
-print('GroupC has completed training!')
+print('GroupE has completed training!')
 # ------------------------------------------------------ #
-
+"""
+- make final 'fully connected layer' have neurons equal to ud *ld * ulstm * llstm
+- test out kc = 100, or removing altogether
+- try out CNN -> LSTM (identified features are fed into recurrent layer)
+- test accuracy over precision
+- test sigmoid training labels
+- test training labels for upside and downside (2 sigmoids instead of 1)
+- test model trained on 0.2 training labels on 0.1 training labels
+"""
 
 # ------------- data prep for groupC ------------------- #
 # for loop creating raw csv data for each month 2021-2023
