@@ -7,6 +7,7 @@ from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Flatt
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
 from mainCode import csvToArray, createConfusionMatrix, listToCSV, csvToList
+from tensorflow import keras
 import datetime
 
 """Creates a CNN autoencoder (32/3, 2, 64/3, 2) to learn patterns in the data,
@@ -35,8 +36,6 @@ np.delete(data, 4, axis=1)   # removes low
 np.delete(data, 3, axis=1)   # removes high
 np.delete(data, 2, axis=1)   # removes open
 
-# TODO: make function to create training labels and save them
-
 # convert date into timestamp then into 'time of day' indicator
 for item in data:
     day = 24 * 60 * 60
@@ -49,22 +48,23 @@ print(df)
 df.drop(columns=[0], inplace=True)
 print(df)
 df = df.astype(float)
-delta_df = df.diff().fillna(0)  # Fill NaN values with 0 for the first row
-
-# Convert delta values back to NumPy array
-delta_data = delta_df.to_numpy()
-
-# Drop delta_data: time; Drop data: close
-np.delete(delta_data, 0, axis=1)
-np.delete(data, 1, axis=1)
-
-# Concatenate original data and delta values along the feature axis
-combined_data = np.concatenate((data, delta_data), axis=1)
-cd_df = pd.DataFrame(combined_data)
-cd_df.dropna()
-combined_data = cd_df.to_numpy()
-print(combined_data)
-listToCSV(combined_data, f'historical_data/{group_name}_data/combined_data.csv')
+# delta_df = df.diff().fillna(0)  # Fill NaN values with 0 for the first row
+#
+# # Convert delta values back to NumPy array
+# delta_data = delta_df.to_numpy()
+#
+# # Drop delta_data: time; Drop data: close
+# np.delete(delta_data, 0, axis=1)
+# np.delete(data, 1, axis=1)
+#
+# # Concatenate original data and delta values along the feature axis
+# combined_data = np.concatenate((data, delta_data), axis=1)
+# cd_df = pd.DataFrame(combined_data)
+# cd_df.dropna()
+# combined_data = cd_df.to_numpy()
+# print(combined_data)
+# listToCSV(combined_data, f'historical_data/{group_name}_data/combined_data.csv')
+combined_data = csvToList('historical_data/groupCNNa_data/combined_data.csv')
 
 # Normalize the data
 # ex. if x has domain [-5,5], scaling [0,1] will turn -2 into a 0.3 (negative vals under 0.5 if even distribution)
@@ -142,16 +142,20 @@ def display_test_results2(model, test_data, test_labels):
 
 # TODO: put everything below into a function
 
-# create training/test data (X) and training/test labels (y)
+# ----create training/test data (X) and training/test labels (y)----
 X = create_dataset(scaled_data, window_size)
 max_upward, max_downward = calculate_max_changes(df, window_size)  # currently contains unscaled delta vals
-csv_file_path = f'historical_data/groupCNNa_data/max_up_labels_{trade_window}.csv'
-df_up = pd.DataFrame(max_upward)
-df_up.to_csv(csv_file_path, index=False)
-csv_file_path = f'historical_data/groupCNNa_data/max_down_labels_{trade_window}.csv'
-df_down = pd.DataFrame(max_downward)
-df_down.to_csv(csv_file_path, index=False)
-print(f"Labels saved to {csv_file_path}")
+# # csv_file_path = f'historical_data/groupCNNa_data/max_up_labels_{trade_window}.csv'
+# # df_up = pd.DataFrame(max_upward)
+# # df_up.to_csv(csv_file_path, index=False)
+# max_upward = csvToList('historical_data/groupCNNa_data/max_up_labels_12.csv')
+# max_upward = np.array(max_upward)
+# # csv_file_path = f'histo   rical_data/groupCNNa_data/max_down_labels_{trade_window}.csv'
+# # df_down = pd.DataFrame(max_downward)
+# # df_down.to_csv(csv_file_path, index=False)
+# max_downward = csvToList('historical_data/groupCNNa_data/max_down_labels_12.csv')
+# max_downward = np.array(max_downward)
+
 y = np.vstack((max_upward, max_downward)).T
 print('y: ')
 print(y)
@@ -168,68 +172,74 @@ print(f'y_test shape: {y_test.shape}')
 print(f'num inputs: {num_inputs}')
 
 # Define the CNN Autoencoder model
-input_layer = Input(shape=(window_size, num_inputs))  # window_size * # of inputs
-print(f'input_layer = {input_layer}')
+# input_layer = Input(shape=(window_size, num_inputs))  # window_size * # of inputs
+# print(f'input_layer = {input_layer}')
 
-# Encoder
-x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(input_layer)
-x = MaxPooling1D(pool_size=2, padding='same')(x)
-x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(x)
-encoded = MaxPooling1D(pool_size=2, padding='same')(x)
-
-# Decoder
-x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(encoded)
-x = UpSampling1D(size=2)(x)
-x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(x)
-x = UpSampling1D(size=2)(x)
-decoded = Conv1D(filters=num_inputs, kernel_size=3, activation='sigmoid', padding='same')(x)
-
-# Compile the model
-autoencoder = Model(input_layer, decoded)
-autoencoder.compile(optimizer='adam', loss='mse')
-
-# Train the autoencoder
-autoencoder.fit(X_train, X_train, epochs=ae_epochs, batch_size=ae_batch_size, validation_data=(X_test, X_test))
-autoencoder.save(f'models/{group_name}/{encoder_name}.keras')
-
-# Print evaluation of the autoencoder
-train_loss = autoencoder.evaluate(X_train, X_train)
-print(f"Training Loss: {train_loss}")
-test_loss = autoencoder.evaluate(X_test, X_test)
-print(f"Test Loss: {test_loss}")
-
-# Create the encoder model
-encoder = Model(input_layer, encoded)
-
-# Encode the train and test data
-encoded_train = encoder.predict(X_train)
+# # Encoder
+# x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(input_layer)
+# x = MaxPooling1D(pool_size=2, padding='same')(x)
+# x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(x)
+# encoded = MaxPooling1D(pool_size=2, padding='same', name='encoded_layer')(x)
+#
+# # Decoder
+# x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(encoded)
+# x = UpSampling1D(size=2)(x)
+# x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(x)
+# x = UpSampling1D(size=2)(x)
+# decoded = Conv1D(filters=num_inputs, kernel_size=3, activation='sigmoid', padding='same')(x)
+#
+# # Compile the model
+# autoencoder = Model(input_layer, decoded)
+# autoencoder.compile(optimizer='adam', loss='mse')
+#
+# # Train the autoencoder
+# autoencoder.fit(X_train, X_train, epochs=ae_epochs, batch_size=ae_batch_size, validation_data=(X_test, X_test))
+# autoencoder.save(f'models/{group_name}/{encoder_name}.keras')
+#
+# # Print evaluation of the autoencoder
+# train_loss = autoencoder.evaluate(X_train, X_train)
+# print(f"Training Loss: {train_loss}")
+# test_loss = autoencoder.evaluate(X_test, X_test)
+# print(f"Test Loss: {test_loss}")
+#
+# # Create the encoder model
+ae_model = keras.models.load_model(f'models/{group_name}/autoencoder1.keras')
+print('ae model summary: ')
+ae_model.summary()
+encoder = Model(ae_model.input, ae_model.get_layer('max_pooling1d_1').output)
+# encoder = Model(input_layer, encoded)
+#
+# # Encode the train and test data
+# encoded_train = encoder.predict(X_train)
 encoded_test = encoder.predict(X_test)
-
-# Flatten encoded features
-encoded_train_flat = encoded_train.reshape(encoded_train.shape[0], -1)
+#
+# # Flatten encoded features
+# encoded_train_flat = encoded_train.reshape(encoded_train.shape[0], -1)
 encoded_test_flat = encoded_test.reshape(encoded_test.shape[0], -1)
-
-# Combine encoded features with raw data
-train_combined = np.hstack((encoded_train_flat, X_train[:, -1, :]))
+#
+# # Combine encoded features with raw data
+# train_combined = np.hstack((encoded_train_flat, X_train[:, -1, :]))
 test_combined = np.hstack((encoded_test_flat, X_test[:, -1, :]))
+#
+#
+# # Define the price delta prediction model
+# # [samples, window_size / 4, # filters in last CNN]
+# #          -flatten & concat-> [samples, (20 / 4 * 64 = 320) + # of features] -> [samples, 320 + # of features]
+# delta_model = Sequential([
+#     Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
+#     Dense(160, activation='relu'),
+#     Dense(80, activation='relu'),
+#     Dense(2, activation='linear')
+# ])
+#
+# # Compile the model
+# delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+#
+# # Train the model
+# delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size, validation_data=(test_combined, y_test))
+# delta_model.save(f'models/{group_name}/{delta_model_name}.keras')
+delta_model = keras.models.load_model(f'models/{group_name}/deltaModel1.keras')
 
-
-# Define the price delta prediction model
-# [samples, window_size / 4, # filters in last CNN]
-#          -flatten & concat-> [samples, (20 / 4 * 64 = 320) + # of features] -> [samples, 320 + # of features]
-delta_model = Sequential([
-    Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
-    Dense(160, activation='relu'),
-    Dense(80, activation='relu'),
-    Dense(2, activation='linear')
-])
-
-# Compile the model
-delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-
-# Train the model
-delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size, validation_data=(test_combined, y_test))
-delta_model.save(f'models/{group_name}/{delta_model_name}.keras')
 
 display_test_results2(delta_model, test_combined, y_test)
 
