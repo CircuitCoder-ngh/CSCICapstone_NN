@@ -6,7 +6,8 @@ from keras.models import Model, Sequential
 from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Flatten
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
-from mainCode import csvToArray, createConfusionMatrix
+from mainCode import csvToArray, createConfusionMatrix, listToCSV, csvToList
+import datetime
 
 """Creates a CNN autoencoder (32/3, 2, 64/3, 2) to learn patterns in the data,
 then feeds predicted features output along w/ the data into a sequential model of 
@@ -20,15 +21,13 @@ group_name = 'groupCNNa'
 threshold = 0.7
 trade_window = 12  # distance to predict price delta and trade opportunity
 window_size = 20  # window size (for CNN lookback)
-epochs = 200
-batch_size = 6
-d_epochs = 100
+ae_epochs = 200  # for autoencoder
+ae_batch_size = 6
+d_epochs = 100  # for delta model
 d_batch_size = 12
 
 # retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
-data = csvToArray('historical_data/SPY5min_rawCombinedFiltered.csv')[:-trade_window]
-
-# TODO: make function to create training labels and save them
+data = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[:-trade_window]
 
 # drop vals to not use
 np.delete(data, 5, axis=1)  # removes vol
@@ -36,14 +35,21 @@ np.delete(data, 4, axis=1)   # removes low
 np.delete(data, 3, axis=1)   # removes high
 np.delete(data, 2, axis=1)   # removes open
 
-# Transform data to delta values # TODO: pick which indicators to diff
-# TODO: get all delta vals then combine w norm vals
-# copy data, drop vals to not diff (datetime, etc), get diff vals, combine delta w/ data
-# delta_data = data[['close', 'OBV', 'EMA']].diff().dropna()
+# TODO: make function to create training labels and save them
 
-# -------------
-# Compute delta values
-delta_df = data.diff().fillna(0)  # Fill NaN values with 0 for the first row
+# convert date into timestamp then into 'time of day' indicator
+for item in data:
+    day = 24 * 60 * 60
+    item[0] = datetime.datetime.strptime(item[0], '%Y-%m-%d %H:%M:%S').timestamp()
+    item[0] = np.sin(item[0] * (2 * np.pi / day))
+
+# Convert to pd dataFrame to compute delta values
+df = pd.DataFrame(data)
+print(df)
+df.drop(columns=[0], inplace=True)
+print(df)
+df = df.astype(float)
+delta_df = df.diff().fillna(0)  # Fill NaN values with 0 for the first row
 
 # Convert delta values back to NumPy array
 delta_data = delta_df.to_numpy()
@@ -54,9 +60,13 @@ np.delete(data, 1, axis=1)
 
 # Concatenate original data and delta values along the feature axis
 combined_data = np.concatenate((data, delta_data), axis=1)
-# --------------
+cd_df = pd.DataFrame(combined_data)
+cd_df.dropna()
+combined_data = cd_df.to_numpy()
+print(combined_data)
+listToCSV(combined_data, f'historical_data/{group_name}_data/combined_data.csv')
 
-# Normalize the data # TODO: pick which features to scale
+# Normalize the data
 # ex. if x has domain [-5,5], scaling [0,1] will turn -2 into a 0.3 (negative vals under 0.5 if even distribution)
 scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(combined_data)
@@ -75,9 +85,12 @@ def calculate_max_changes(data, trade_window):
     max_upward_changes = []
     max_downward_changes = []
     for i in range(len(data) - trade_window):
-        window = data[i:i + trade_window, 0]  # Assuming stock_price is the first feature # TODO: fix this
-        max_upward_changes.append(np.max(window) - window[0])
-        max_downward_changes.append(np.min(window) - window[0])
+        # window = data[i:i + trade_window, 0]  # Assuming close price is the 1st feature
+        window = data.iloc[i:i + trade_window, 0]
+        # print(f'window: {window}')
+        # print(f'window.iloc[0] = {window.iloc[0]}')
+        max_upward_changes.append(np.max(window) - window.iloc[0])
+        max_downward_changes.append(np.min(window) - window.iloc[0])
     return np.array(max_upward_changes), np.array(max_downward_changes)
 
 
@@ -131,8 +144,17 @@ def display_test_results2(model, test_data, test_labels):
 
 # create training/test data (X) and training/test labels (y)
 X = create_dataset(scaled_data, window_size)
-max_upward, max_downward = calculate_max_changes(data, window_size)  # currently contains unscaled delta vals
-y = np.vstack((max_upward, max_downward)).T  # TODO: confirm X and y are same length
+max_upward, max_downward = calculate_max_changes(df, window_size)  # currently contains unscaled delta vals
+csv_file_path = f'historical_data/groupCNNa_data/max_up_labels_{trade_window}.csv'
+df_up = pd.DataFrame(max_upward)
+df_up.to_csv(csv_file_path, index=False)
+csv_file_path = f'historical_data/groupCNNa_data/max_down_labels_{trade_window}.csv'
+df_down = pd.DataFrame(max_downward)
+df_down.to_csv(csv_file_path, index=False)
+print(f"Labels saved to {csv_file_path}")
+y = np.vstack((max_upward, max_downward)).T
+print('y: ')
+print(y)
 
 # Split the data sequentially
 split_index = int(len(X) * 0.8)
@@ -141,9 +163,13 @@ y_train, y_test = y[:split_index], y[split_index:]
 num_inputs = X_train.shape[2]  # TODO: confirm this is correct, should equal num of inputs
 print(f'X_train shape: {X_train.shape} ...is [2] == num of inputs?')
 print(f'y_train shape: {y_train.shape} ...is [0] == X_train[0]')
+print(f'X_test shape: {X_test.shape}')
+print(f'y_test shape: {y_test.shape}')
+print(f'num inputs: {num_inputs}')
 
 # Define the CNN Autoencoder model
 input_layer = Input(shape=(window_size, num_inputs))  # window_size * # of inputs
+print(f'input_layer = {input_layer}')
 
 # Encoder
 x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(input_layer)
@@ -156,14 +182,14 @@ x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(encoded
 x = UpSampling1D(size=2)(x)
 x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(x)
 x = UpSampling1D(size=2)(x)
-decoded = Conv1D(filters=3, kernel_size=3, activation='sigmoid', padding='same')(x)
+decoded = Conv1D(filters=num_inputs, kernel_size=3, activation='sigmoid', padding='same')(x)
 
 # Compile the model
 autoencoder = Model(input_layer, decoded)
 autoencoder.compile(optimizer='adam', loss='mse')
 
 # Train the autoencoder
-autoencoder.fit(X_train, X_train, epochs=epochs, batch_size=batch_size, validation_data=(X_test, X_test))
+autoencoder.fit(X_train, X_train, epochs=ae_epochs, batch_size=ae_batch_size, validation_data=(X_test, X_test))
 autoencoder.save(f'models/{group_name}/{encoder_name}.keras')
 
 # Print evaluation of the autoencoder
@@ -203,7 +229,7 @@ delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
 # Train the model
 delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size, validation_data=(test_combined, y_test))
-delta_model.save(f'models/groupCNNa/{delta_model_name}.keras')
+delta_model.save(f'models/{group_name}/{delta_model_name}.keras')
 
 display_test_results2(delta_model, test_combined, y_test)
 
