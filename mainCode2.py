@@ -121,6 +121,7 @@ def create_trade_labels(data, trade_window, desired_delta):
     """looks into the future 'trade_window' and says whether good trade available"""
     up_labels = []
     down_labels = []
+    labels = []
     for i in range(len(data) - trade_window):
         initial_price = data.iloc[i, 0]  # Assuming the price is the first feature
         for j in range(1, trade_window + 1):
@@ -128,21 +129,24 @@ def create_trade_labels(data, trade_window, desired_delta):
             if future_price >= initial_price + desired_delta:
                 up_labels.append(1)
                 down_labels.append(0)
+                labels.append(1)
                 break
             elif future_price <= initial_price - desired_delta:
                 up_labels.append(0)
                 down_labels.append(1)
+                labels.append(1)
                 break
             elif j == trade_window:
                 up_labels.append(0)
                 down_labels.append(0)
+                labels.append(0)
 
     up_labels = np.array(up_labels)
     down_labels = np.array(down_labels)
+    labels = np.array(labels)
     combined_labels = np.column_stack((up_labels, down_labels))
-    print(combined_labels.shape)
 
-    return np.array(combined_labels)
+    return labels  # return 'combined_samples' for 2 outputs, or 'labels' for 1 output
 
 
 def display_test_results1(model, test_data, test_labels, trade_model_name):
@@ -159,18 +163,22 @@ def createConfusionMatrices(model, model_name, group_name, t_data, t_labels, thr
     """Creates and saves a confusion matrix
     Parameters: model, a chosen name for the model, the group name, and test data appropriate for the model"""
     predictions = model.predict(t_data)
+    up_predictions = predictions[:, 0]
+    down_predictions = predictions[:, 1]
 
     # Round to 0 or 1 based on the threshold
-    binary_predictions = (predictions > threshold).astype(int)  # np.where(predictions >= threshold, 1, 0)
+    binary_predictions = (predictions > threshold).astype(int)
+    binary_up_predictions = np.where(up_predictions >= threshold, 1, 0)
+    binary_down_predictions = np.where(down_predictions >= threshold, 1, 0)
 
-    cm = confusion_matrix(y_true=t_labels[:, 0], y_pred=binary_predictions[:, 0])
+    cm = confusion_matrix(y_true=t_labels[:, 0], y_pred=binary_up_predictions)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
     plt.title("Confusion Matrix for Upside Trades")
     plt.savefig(f'models/{group_name}cm/{model_name}_upCM.png')
     plt.close()
 
-    cm = confusion_matrix(y_true=t_labels[:, 1], y_pred=binary_predictions[:, 1])
+    cm = confusion_matrix(y_true=t_labels[:, 1], y_pred=binary_down_predictions)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
     plt.title("Confusion Matrix for Downside Trades")
@@ -370,37 +378,37 @@ trade_model = Sequential([
     Dropout(0.5),
     Dense(85, activation='relu'),
     Dropout(0.5),
-    Dense(2, activation='sigmoid')  # Assuming binary classification for trade opportunity
+    Dense(1, activation='sigmoid')  # Assuming binary classification for trade opportunity
 ])
 
-trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])  # keras.metrics.Precision()
-
-# Define early stopping callback
-early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
-
-# Train the trade model
-history = trade_model.fit(
-    train_features, trade_labels_train,
-    epochs=t_epochs,
-    batch_size=t_batch_size,
-    validation_data=(test_features, trade_labels_test),
-    callbacks=[early_stopping]
-)
-
+# trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
+#
+# # Define early stopping callback
+# early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
+#
+# # Train the trade model
+# history = trade_model.fit(
+#     train_features, trade_labels_train,
+#     epochs=t_epochs,
+#     batch_size=t_batch_size,
+#     validation_data=(test_features, trade_labels_test),
+#     callbacks=[early_stopping]
+# )
+#
 trade_model_name = trade_model_name + 'b'
-trade_model.save(f'models/{group_name}/{trade_model_name}.keras')
+# trade_model.save(f'models/{group_name}/{trade_model_name}.keras')
 
 # Load desired model
-# trade_model = keras.models.load_model(f'models/{group_name}/tradeModel2.keras')
-# display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
-createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
+trade_model = keras.models.load_model(f'models/{group_name}/tradeModel1b.keras')
+display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
+# createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
 
 # Testing model
 t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
 trade_labels_test = z[split_index:]
 trade_model_name = trade_model_name + '_halvedLabels'
-# display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
-createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
+display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
+# createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
 
 """
 to use live:
@@ -409,6 +417,7 @@ to use live:
     delta_model predict,
     trade_model predict (-1)
 
+** recreate live data backtesting by providing limited data at each point (is this already accomplished?)
 """
 
 # # Predict trade opportunities using the trade model
@@ -427,3 +436,4 @@ to use live:
 # plt.title('Close Price with Trade Signals')
 # plt.legend()
 # plt.show()
+
