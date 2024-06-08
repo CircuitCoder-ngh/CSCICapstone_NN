@@ -129,16 +129,18 @@ def create_trade_labels(data, trade_window, desired_delta):
                 up_labels.append(1)
                 down_labels.append(0)
                 break
-            if future_price <= initial_price - desired_delta:
+            elif future_price <= initial_price - desired_delta:
                 up_labels.append(0)
                 down_labels.append(1)
-            if j == trade_window:
+                break
+            elif j == trade_window:
                 up_labels.append(0)
                 down_labels.append(0)
 
     up_labels = np.array(up_labels)
     down_labels = np.array(down_labels)
-    combined_labels = np.hstack((up_labels, down_labels))
+    combined_labels = np.column_stack((up_labels, down_labels))
+    print(combined_labels.shape)
 
     return np.array(combined_labels)
 
@@ -159,17 +161,19 @@ def createConfusionMatrices(model, model_name, group_name, t_data, t_labels, thr
     predictions = model.predict(t_data)
 
     # Round to 0 or 1 based on the threshold
-    binary_predictions = np.where(predictions >= threshold, 1, 0)
+    binary_predictions = (predictions > threshold).astype(int)  # np.where(predictions >= threshold, 1, 0)
 
     cm = confusion_matrix(y_true=t_labels[:, 0], y_pred=binary_predictions[:, 0])
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
+    plt.title("Confusion Matrix for Upside Trades")
     plt.savefig(f'models/{group_name}cm/{model_name}_upCM.png')
     plt.close()
 
     cm = confusion_matrix(y_true=t_labels[:, 1], y_pred=binary_predictions[:, 1])
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
+    plt.title("Confusion Matrix for Downside Trades")
     plt.savefig(f'models/{group_name}cm/{model_name}_downCM.png')
     plt.close()
     # plt.show()
@@ -369,7 +373,7 @@ trade_model = Sequential([
     Dense(2, activation='sigmoid')  # Assuming binary classification for trade opportunity
 ])
 
-trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
+trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])  # keras.metrics.Precision()
 
 # Define early stopping callback
 early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
@@ -383,20 +387,20 @@ history = trade_model.fit(
     callbacks=[early_stopping]
 )
 
-trade_model_name = trade_model_name
+trade_model_name = trade_model_name + 'b'
 trade_model.save(f'models/{group_name}/{trade_model_name}.keras')
 
 # Load desired model
-# trade_model = keras.models.load_model(f'models/{group_name}/tradeModel1b.keras')
+# trade_model = keras.models.load_model(f'models/{group_name}/tradeModel2.keras')
 # display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
-createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, 0.7)
+createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
 
 # Testing model
 t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
 trade_labels_test = z[split_index:]
 trade_model_name = trade_model_name + '_halvedLabels'
 # display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
-createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, 0.7)
+createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
 
 """
 to use live:
@@ -407,19 +411,19 @@ to use live:
 
 """
 
-# Predict trade opportunities using the trade model
-predictions = (trade_model.predict(test_features) > 0.5).astype(int).flatten()
-
-# Plot the close price along with trade markers
-unscaled_data_test = unscaled_data[split_index:]
-close_prices = unscaled_data_test.iloc[:, 0]  # Assuming the close price is the first feature in the last timestep
-
-plt.figure(figsize=(15, 7))
-plt.plot(close_prices, label='Close Price', color='blue')
-plt.scatter(np.arange(len(close_prices))[predictions == 1], close_prices[predictions == 1],
-            color='red', marker='o', label='Trade Signal')
-plt.xlabel('Time')
-plt.ylabel('Price')
-plt.title('Close Price with Trade Signals')
-plt.legend()
-plt.show()
+# # Predict trade opportunities using the trade model
+# predictions = (trade_model.predict(test_features) > 0.5).astype(int).flatten()
+#
+# # Plot the close price along with trade markers
+# unscaled_data_test = unscaled_data[split_index:]
+# close_prices = unscaled_data_test.iloc[:, 0]  # Assuming the close price is the first feature in the last timestep
+#
+# plt.figure(figsize=(15, 7))
+# plt.plot(close_prices, label='Close Price', color='blue')
+# plt.scatter(np.arange(len(close_prices))[predictions == 1], close_prices[predictions == 1],
+#             color='red', marker='o', label='Trade Signal')
+# plt.xlabel('Time')
+# plt.ylabel('Price')
+# plt.title('Close Price with Trade Signals')
+# plt.legend()
+# plt.show()
