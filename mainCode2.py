@@ -3,11 +3,12 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from keras.models import Model, Sequential
-from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Flatten
+from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Flatten, Dropout
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
 from mainCode import csvToArray, createConfusionMatrix, listToCSV, csvToList
 from tensorflow import keras
+from keras.callbacks import EarlyStopping
 import datetime
 
 """Creates a CNN autoencoder (32/3, 2, 64/3, 2) to learn patterns in the data,
@@ -17,18 +18,21 @@ changes that will occur in the upcoming window """
 
 delta_model_name = 'deltaModel1'
 encoder_name = 'autoencoder1'
-trade_model_name = 'tradeModel1'
+trade_model_name = 'tradeModel2'
 group_name = 'groupCNNa'
 threshold = 0.7
 trade_window = 12  # distance to predict price delta and trade opportunity
 window_size = 20  # window size (for CNN lookback)
 ae_epochs = 200  # for autoencoder
 ae_batch_size = 6
-d_epochs = 100  # for delta model
+d_epochs = 200  # for delta model
 d_batch_size = 12
+t_epochs = 200  # for trade model
+t_batch_size = 12
+desired_delta = 1
 
 # retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
-data = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[:-trade_window]
+data = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
 
 # drop vals to not use
 np.delete(data, 5, axis=1)  # removes vol
@@ -48,21 +52,22 @@ print(df)
 df.drop(columns=[0], inplace=True)
 print(df)
 df = df.astype(float)
-# delta_df = df.diff().fillna(0)  # Fill NaN values with 0 for the first row
-#
-# # Convert delta values back to NumPy array
-# delta_data = delta_df.to_numpy()
-#
-# # Drop delta_data: time; Drop data: close
-# np.delete(delta_data, 0, axis=1)
-# np.delete(data, 1, axis=1)
-#
-# # Concatenate original data and delta values along the feature axis
-# combined_data = np.concatenate((data, delta_data), axis=1)
-# cd_df = pd.DataFrame(combined_data)
-# cd_df.dropna()
-# combined_data = cd_df.to_numpy()
-# print(combined_data)
+unscaled_data = df.copy()
+delta_df = df.diff().fillna(0)  # Fill NaN values with 0 for the first row
+
+# Convert delta values back to NumPy array
+delta_data = delta_df.to_numpy()
+
+# Drop delta_data: time; Drop data: close
+np.delete(delta_data, 0, axis=1)
+np.delete(data, 1, axis=1)
+
+# Concatenate original data and delta values along the feature axis
+combined_data = np.concatenate((data, delta_data), axis=1)
+cd_df = pd.DataFrame(combined_data)
+cd_df.dropna()
+combined_data = cd_df.to_numpy()
+print(combined_data)
 # listToCSV(combined_data, f'historical_data/{group_name}_data/combined_data.csv')
 combined_data = csvToList('historical_data/groupCNNa_data/combined_data.csv')
 
@@ -72,16 +77,34 @@ scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(combined_data)
 
 
-# Create dataset function (preps data for CNN autoencoder)
-def create_dataset(data, window_size):
+# Create dataset function (preps data for CNN autoencoder and labels for delta_model)
+def create_dataset(data, window_size, unscaled_data, trade_window, desired_delta):
     X = []
-    for i in range(len(data) - window_size):
+    y = []
+    z = []
+    max_upward, max_downward = calculate_max_changes(unscaled_data, trade_window)
+    trade_labels = create_trade_labels(unscaled_data, trade_window, desired_delta)
+    # currently contains unscaled delta vals
+    # y = np.vstack((max_upward, max_downward)).T
+    # print('y: ')
+    # print(y)
+    for i in range(len(data) - window_size - trade_window):
         X.append(data[i:i + window_size])
-    return np.array(X)
+        y.append([max_upward[i + window_size], max_downward[i + window_size]])
+        z.append(trade_labels[i + window_size])
+    dataX = np.array(X)
+    dataY = np.array(y)
+    dataZ = np.array(z)
+    print(f'X shape: {dataX.shape}')
+    print(f'y shape: {dataY.shape}')
+    print(f'z shape: {dataZ.shape}')
+
+    return dataX, dataY, dataZ
 
 
 # calculates the max upward and max downward changes
 def calculate_max_changes(data, trade_window):
+    """looks into future 'trade_window' and identifies max up/down price change"""
     max_upward_changes = []
     max_downward_changes = []
     for i in range(len(data) - trade_window):
@@ -94,18 +117,62 @@ def calculate_max_changes(data, trade_window):
     return np.array(max_upward_changes), np.array(max_downward_changes)
 
 
-def display_test_results1(model, test_data, test_labels):
+def create_trade_labels(data, trade_window, desired_delta):
+    """looks into the future 'trade_window' and says whether good trade available"""
+    up_labels = []
+    down_labels = []
+    for i in range(len(data) - trade_window):
+        initial_price = data.iloc[i, 0]  # Assuming the price is the first feature
+        for j in range(1, trade_window + 1):
+            future_price = data.iloc[i + j, 0]
+            if future_price >= initial_price + desired_delta:
+                up_labels.append(1)
+                down_labels.append(0)
+                break
+            if future_price <= initial_price - desired_delta:
+                up_labels.append(0)
+                down_labels.append(1)
+            if j == trade_window:
+                up_labels.append(0)
+                down_labels.append(0)
+
+    up_labels = np.array(up_labels)
+    down_labels = np.array(down_labels)
+    combined_labels = np.hstack((up_labels, down_labels))
+
+    return np.array(combined_labels)
+
+
+def display_test_results1(model, test_data, test_labels, trade_model_name):
     """for displaying results of trade opportunity model"""
     # Evaluate the model on the test data
-    loss, accuracy = model.evaluate(test_data, test_labels, verbose=0)
-
-    # Display accuracy and loss
-    print(f"Test Accuracy: {accuracy * 100:.2f}%")
-    print(f"Test Loss: {loss:.4f}")
+    model.evaluate(test_data, test_labels, verbose=0)
 
     # Create and save confusion matrix
     createConfusionMatrix(model, model_name=trade_model_name, group_name=group_name, t_data=test_data,
                           t_labels=test_labels, threshold=threshold)
+
+
+def createConfusionMatrices(model, model_name, group_name, t_data, t_labels, threshold):
+    """Creates and saves a confusion matrix
+    Parameters: model, a chosen name for the model, the group name, and test data appropriate for the model"""
+    predictions = model.predict(t_data)
+
+    # Round to 0 or 1 based on the threshold
+    binary_predictions = np.where(predictions >= threshold, 1, 0)
+
+    cm = confusion_matrix(y_true=t_labels[:, 0], y_pred=binary_predictions[:, 0])
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+    disp.plot()
+    plt.savefig(f'models/{group_name}cm/{model_name}_upCM.png')
+    plt.close()
+
+    cm = confusion_matrix(y_true=t_labels[:, 1], y_pred=binary_predictions[:, 1])
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+    disp.plot()
+    plt.savefig(f'models/{group_name}cm/{model_name}_downCM.png')
+    plt.close()
+    # plt.show()
 
 
 # Example usage:
@@ -133,6 +200,7 @@ def display_test_results2(model, test_data, test_labels):
     plt.plot(predictions[:, 0], label='Predicted Max Upward Change', alpha=0.7)
     plt.plot(predictions[:, 1], label='Predicted Max Downward Change', alpha=0.7)
     plt.legend()
+    # plt.savefig(f'models/{group_name}/')  # TODO: fix this
     plt.show()
 
 # Example usage of display_test_results
@@ -143,8 +211,7 @@ def display_test_results2(model, test_data, test_labels):
 # TODO: put everything below into a function
 
 # ----create training/test data (X) and training/test labels (y)----
-X = create_dataset(scaled_data, window_size)
-max_upward, max_downward = calculate_max_changes(df, window_size)  # currently contains unscaled delta vals
+X, y, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta)
 # # csv_file_path = f'historical_data/groupCNNa_data/max_up_labels_{trade_window}.csv'
 # # df_up = pd.DataFrame(max_upward)
 # # df_up.to_csv(csv_file_path, index=False)
@@ -155,10 +222,6 @@ max_upward, max_downward = calculate_max_changes(df, window_size)  # currently c
 # # df_down.to_csv(csv_file_path, index=False)
 # max_downward = csvToList('historical_data/groupCNNa_data/max_down_labels_12.csv')
 # max_downward = np.array(max_downward)
-
-y = np.vstack((max_upward, max_downward)).T
-print('y: ')
-print(y)
 
 # Split the data sequentially
 split_index = int(len(X) * 0.8)
@@ -202,7 +265,7 @@ print(f'num inputs: {num_inputs}')
 # test_loss = autoencoder.evaluate(X_test, X_test)
 # print(f"Test Loss: {test_loss}")
 #
-# # Create the encoder model
+# # Create/Load the encoder model
 ae_model = keras.models.load_model(f'models/{group_name}/autoencoder1.keras')
 print('ae model summary: ')
 ae_model.summary()
@@ -210,38 +273,48 @@ encoder = Model(ae_model.input, ae_model.get_layer('max_pooling1d_1').output)
 # encoder = Model(input_layer, encoded)
 #
 # # Encode the train and test data
-# encoded_train = encoder.predict(X_train)
+encoded_train = encoder.predict(X_train)
 encoded_test = encoder.predict(X_test)
 #
 # # Flatten encoded features
-# encoded_train_flat = encoded_train.reshape(encoded_train.shape[0], -1)
+encoded_train_flat = encoded_train.reshape(encoded_train.shape[0], -1)
 encoded_test_flat = encoded_test.reshape(encoded_test.shape[0], -1)
 #
 # # Combine encoded features with raw data
-# train_combined = np.hstack((encoded_train_flat, X_train[:, -1, :]))
+train_combined = np.hstack((encoded_train_flat, X_train[:, -1, :]))
 test_combined = np.hstack((encoded_test_flat, X_test[:, -1, :]))
 #
+print(f'train_combined shape: {train_combined.shape}')
+print(f'y_train shape: {y_train.shape}')
+print(f'test_combined shape: {test_combined.shape}')
+print(f'y_test shape: {y_test.shape}')
 #
 # # Define the price delta prediction model
 # # [samples, window_size / 4, # filters in last CNN]
 # #          -flatten & concat-> [samples, (20 / 4 * 64 = 320) + # of features] -> [samples, 320 + # of features]
-# delta_model = Sequential([
-#     Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
-#     Dense(160, activation='relu'),
-#     Dense(80, activation='relu'),
-#     Dense(2, activation='linear')
-# ])
-#
-# # Compile the model
+delta_model = Sequential([
+    Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
+    Dropout(0.5),
+    Dense(160, activation='relu'),
+    Dropout(0.5),
+    Dense(80, activation='relu'),
+    Dropout(0.5),
+    Dense(2, activation='linear')
+])
+
+# Compile the model
 # delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 #
+# # Define early stopping callback
+# early_stopping = EarlyStopping(monitor='val_loss', patience=100, restore_best_weights=True)
+#
 # # Train the model
-# delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size, validation_data=(test_combined, y_test))
-# delta_model.save(f'models/{group_name}/{delta_model_name}.keras')
-delta_model = keras.models.load_model(f'models/{group_name}/deltaModel1.keras')
+# delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
+#                 validation_data=(test_combined, y_test), callbacks=[early_stopping])
+# delta_model.save(f'models/{group_name}/{delta_model_name}e.keras')
+delta_model = keras.models.load_model(f'models/{group_name}/deltaModel1e.keras')
 
-
-display_test_results2(delta_model, test_combined, y_test)
+# display_test_results2(delta_model, test_combined, y_test)
 
 """
 inputs for delta model:
@@ -264,4 +337,89 @@ inputs for delta model:
 
 output for delta model
 - prediction of max up/down price delta for desired window
+
+
+question: is CNN getting data[i:i+window_size] and being used to predict delta price for i+trade_window
+or is it being used to predict delta price for (i+window_size)+trade_window ? 
 """
+
+predicted_deltas_train = delta_model.predict(train_combined)
+predicted_deltas_test = delta_model.predict(test_combined)
+
+# Combine (encoded features + X data) with predicted deltas for the trade model
+train_features = np.hstack((train_combined, predicted_deltas_train))  # changed from encoded_train_flat in tradeModel1
+test_features = np.hstack((test_combined, predicted_deltas_test))  # changed from encoded_test_flat for tradeModel1b
+
+# Split trading labels into train and test set
+trade_labels_train, trade_labels_test = z[:split_index], z[split_index:]
+
+print(f'train_features shape: {train_features.shape}')
+print(f'test_features shape: {test_features.shape}')
+print(f'trade_labels_train shape: {trade_labels_train.shape}')
+print(f'trade_labels_test shape: {trade_labels_test.shape}')
+
+
+trade_model = Sequential([
+    Dense(340, activation='relu', input_shape=(train_features.shape[1],)),
+    Dropout(0.5),
+    Dense(170, activation='relu'),
+    Dropout(0.5),
+    Dense(85, activation='relu'),
+    Dropout(0.5),
+    Dense(2, activation='sigmoid')  # Assuming binary classification for trade opportunity
+])
+
+trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
+
+# Define early stopping callback
+early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
+
+# Train the trade model
+history = trade_model.fit(
+    train_features, trade_labels_train,
+    epochs=t_epochs,
+    batch_size=t_batch_size,
+    validation_data=(test_features, trade_labels_test),
+    callbacks=[early_stopping]
+)
+
+trade_model_name = trade_model_name
+trade_model.save(f'models/{group_name}/{trade_model_name}.keras')
+
+# Load desired model
+# trade_model = keras.models.load_model(f'models/{group_name}/tradeModel1b.keras')
+# display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
+createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, 0.7)
+
+# Testing model
+t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
+trade_labels_test = z[split_index:]
+trade_model_name = trade_model_name + '_halvedLabels'
+# display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
+createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, 0.7)
+
+"""
+to use live:
+    get latest data (X)
+    CNN autoencoder predict,
+    delta_model predict,
+    trade_model predict (-1)
+
+"""
+
+# Predict trade opportunities using the trade model
+predictions = (trade_model.predict(test_features) > 0.5).astype(int).flatten()
+
+# Plot the close price along with trade markers
+unscaled_data_test = unscaled_data[split_index:]
+close_prices = unscaled_data_test.iloc[:, 0]  # Assuming the close price is the first feature in the last timestep
+
+plt.figure(figsize=(15, 7))
+plt.plot(close_prices, label='Close Price', color='blue')
+plt.scatter(np.arange(len(close_prices))[predictions == 1], close_prices[predictions == 1],
+            color='red', marker='o', label='Trade Signal')
+plt.xlabel('Time')
+plt.ylabel('Price')
+plt.title('Close Price with Trade Signals')
+plt.legend()
+plt.show()
