@@ -18,7 +18,7 @@ changes that will occur in the upcoming window """
 
 encoder_name = 'autoencoder1'
 delta_model_name = 'deltaModel1e'
-trade_model_name = 'tradeModel1b'
+trade_model_name = 'tradeModel1b_upOnly'
 group_name = 'groupCNNa'
 threshold = 0.7
 trade_window = 12  # distance to predict price delta and trade opportunity
@@ -30,9 +30,10 @@ d_batch_size = 12
 t_epochs = 200  # for trade model
 t_batch_size = 12
 desired_delta = 1
+patience = 20
 retrain_encoder = False
 retrain_delta_model = False
-retrain_trade_model = False
+retrain_trade_model = True
 
 
 def normalizeData():
@@ -138,11 +139,11 @@ def create_trade_labels(data, trade_window, desired_delta):
                 down_labels.append(0)
                 labels.append(1)
                 break
-            elif future_price <= initial_price - desired_delta:
-                up_labels.append(0)
-                down_labels.append(1)
-                labels.append(1)
-                break
+            # elif future_price <= initial_price - desired_delta:
+            #     up_labels.append(0)
+            #     down_labels.append(1)
+            #     labels.append(1)
+            #     break
             elif j == trade_window:
                 up_labels.append(0)
                 down_labels.append(0)
@@ -226,40 +227,44 @@ def display_test_results2(model, test_data, test_labels):
 # display_test_results2(model, X_test, y_test)
 
 
-def get_encoder(num_inputs, X_train, X_test):
-    # Define the CNN Autoencoder model
-    input_layer = Input(shape=(window_size, num_inputs))  # window_size * # of inputs
-    print(f'input_layer = {input_layer}')
+def get_encoder(retrain, num_inputs, X_train, X_test):
+    if retrain:
+        # Define the CNN Autoencoder model
+        input_layer = Input(shape=(window_size, num_inputs))  # window_size * # of inputs
+        print(f'input_layer = {input_layer}')
 
-    # Encoder
-    x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(input_layer)
-    x = MaxPooling1D(pool_size=2, padding='same')(x)
-    x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(x)
-    encoded = MaxPooling1D(pool_size=2, padding='same', name='encoded_layer')(x)
+        # Encoder
+        x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(input_layer)
+        x = MaxPooling1D(pool_size=2, padding='same')(x)
+        x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(x)
+        encoded = MaxPooling1D(pool_size=2, padding='same', name='encoded_layer')(x)
 
-    # Decoder
-    x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(encoded)
-    x = UpSampling1D(size=2)(x)
-    x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(x)
-    x = UpSampling1D(size=2)(x)
-    decoded = Conv1D(filters=num_inputs, kernel_size=3, activation='sigmoid', padding='same')(x)
+        # Decoder
+        x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(encoded)
+        x = UpSampling1D(size=2)(x)
+        x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(x)
+        x = UpSampling1D(size=2)(x)
+        decoded = Conv1D(filters=num_inputs, kernel_size=3, activation='sigmoid', padding='same')(x)
 
-    # Compile the model
-    autoencoder = Model(input_layer, decoded)
-    # autoencoder.compile(optimizer='adam', loss='mse')
+        # Compile the model
+        autoencoder = Model(input_layer, decoded)
+        autoencoder.compile(optimizer='adam', loss='mse')
 
-    # Train the autoencoder
-    # autoencoder.fit(X_train, X_train, epochs=ae_epochs, batch_size=ae_batch_size, validation_data=(X_test, X_test))
-    # autoencoder.save(f'models/{group_name}/{encoder_name}.keras')
+        # Train the autoencoder
+        autoencoder.fit(X_train, X_train, epochs=ae_epochs, batch_size=ae_batch_size, validation_data=(X_test, X_test))
+        autoencoder.save(f'models/{group_name}/{encoder_name}.keras')
+        ae_model = autoencoder
 
-    # Print evaluation of the autoencoder
-    train_loss = autoencoder.evaluate(X_train, X_train)
-    print(f"Training Loss: {train_loss}")
-    test_loss = autoencoder.evaluate(X_test, X_test)
-    print(f"Test Loss: {test_loss}")
-    #
-    # # Create/Load the encoder model
-    ae_model = keras.models.load_model(f'models/{group_name}/autoencoder1.keras')
+        # Print evaluation of the autoencoder
+        train_loss = autoencoder.evaluate(X_train, X_train)
+        print(f"Training Loss: {train_loss}")
+        test_loss = autoencoder.evaluate(X_test, X_test)
+        print(f"Test Loss: {test_loss}")
+
+    else:
+        # # Create/Load the encoder model
+        ae_model = keras.models.load_model(f'models/{group_name}/{encoder_name}.keras')
+
     print('ae model summary: ')
     ae_model.summary()
     encoder = Model(ae_model.input, ae_model.get_layer('max_pooling1d_1').output)
@@ -268,65 +273,68 @@ def get_encoder(num_inputs, X_train, X_test):
     return encoder
 
 
-def get_delta_model(train_combined, y_train, test_combined, y_test):
+def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
     # # Define the price delta prediction model
     # # [samples, window_size / 4, # filters in last CNN]
     # #          -flatten & concat-> [samples, (20 / 4 * 64 = 320) + # of features] -> [samples, 320 + # of features]
-    delta_model = Sequential([
-        Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
-        Dropout(0.5),
-        Dense(160, activation='relu'),
-        Dropout(0.5),
-        Dense(80, activation='relu'),
-        Dropout(0.5),
-        Dense(2, activation='linear')
-    ])
+    if retrain:
+        delta_model = Sequential([
+            Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
+            Dropout(0.5),
+            Dense(160, activation='relu'),
+            Dropout(0.5),
+            Dense(80, activation='relu'),
+            Dropout(0.5),
+            Dense(2, activation='linear')
+        ])
 
-    # Compile the model
-    # delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-    #
-    # # Define early stopping callback
-    # early_stopping = EarlyStopping(monitor='val_loss', patience=100, restore_best_weights=True)
-    #
-    # # Train the model
-    # delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
-    #                 validation_data=(test_combined, y_test), callbacks=[early_stopping])
-    # delta_model.save(f'models/{group_name}/{delta_model_name}e.keras')
-    delta_model = keras.models.load_model(f'models/{group_name}/deltaModel1e.keras')
+        # Compile the model
+        delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+        # Define early stopping callback
+        early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
+
+        # Train the model
+        delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
+                        validation_data=(test_combined, y_test), callbacks=[early_stopping])
+        delta_model.save(f'models/{group_name}/{delta_model_name}e.keras')
+
+    else:  # Load the model
+        delta_model = keras.models.load_model(f'models/{group_name}/{delta_model_name}.keras')
 
     return delta_model
 
 
-def get_trade_model(train_features, trade_labels_train, test_features, trade_labels_test):
-    trade_model = Sequential([
-        Dense(340, activation='relu', input_shape=(train_features.shape[1],)),
-        Dropout(0.5),
-        Dense(170, activation='relu'),
-        Dropout(0.5),
-        Dense(85, activation='relu'),
-        Dropout(0.5),
-        Dense(1, activation='sigmoid')  # Assuming binary classification for trade opportunity
-    ])
+def get_trade_model(retrain, train_features, trade_labels_train, test_features, trade_labels_test):
+    if retrain:
+        trade_model = Sequential([
+            Dense(340, activation='relu', input_shape=(train_features.shape[1],)),
+            Dropout(0.5),
+            Dense(170, activation='relu'),
+            Dropout(0.5),
+            Dense(85, activation='relu'),
+            Dropout(0.5),
+            Dense(1, activation='sigmoid')  # Assuming binary classification for trade opportunity
+        ])
 
-    # trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
-    #
-    # # Define early stopping callback
-    # early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
-    #
-    # # Train the trade model
-    # history = trade_model.fit(
-    #     train_features, trade_labels_train,
-    #     epochs=t_epochs,
-    #     batch_size=t_batch_size,
-    #     validation_data=(test_features, trade_labels_test),
-    #     callbacks=[early_stopping]
-    # )
-    #
-    # td_name = f'{trade_model_name}b'  # shouldn't rename w/n function
-    # trade_model.save(f'models/{group_name}/{td_name}.keras')
+        trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
 
-    # Load desired model
-    trade_model = keras.models.load_model(f'models/{group_name}/{trade_model_name}.keras')
+        # Define early stopping callback
+        early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
+
+        # Train the trade model
+        history = trade_model.fit(
+            train_features, trade_labels_train,
+            epochs=t_epochs,
+            batch_size=t_batch_size,
+            validation_data=(test_features, trade_labels_test),
+            callbacks=[early_stopping]
+        )
+
+        trade_model.save(f'models/{group_name}/{trade_model_name}.keras')
+
+    else:  # Load desired model
+        trade_model = keras.models.load_model(f'models/{group_name}/{trade_model_name}.keras')
 
     return trade_model
 
@@ -347,7 +355,7 @@ def run_pipeline():
     print(f'y_test shape: {y_test.shape}')
     print(f'num inputs: {num_inputs}')
 
-    encoder = get_encoder(num_inputs, X_train, X_test)
+    encoder = get_encoder(retrain_encoder, num_inputs, X_train, X_test)
     # Encode the train and test data
     encoded_train = encoder.predict(X_train)
     encoded_test = encoder.predict(X_test)
@@ -366,8 +374,8 @@ def run_pipeline():
     print(f'y_test shape: {y_test.shape}')
 
     # Get delta model
-    delta_model = get_delta_model(train_combined, y_train, test_combined, y_test)
-    # display_test_results2(delta_model, test_combined, y_test)
+    delta_model = get_delta_model(retrain_delta_model, train_combined, y_train, test_combined, y_test)
+    display_test_results2(delta_model, test_combined, y_test)
 
     # Get delta model predictions
     predicted_deltas_train = delta_model.predict(train_combined)
@@ -386,7 +394,8 @@ def run_pipeline():
     print(f'trade_labels_train shape: {trade_labels_train.shape}')
     print(f'trade_labels_test shape: {trade_labels_test.shape}')
 
-    trade_model = get_trade_model(train_features, trade_labels_train, test_features, trade_labels_test)
+    # Get trade model
+    trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features, trade_labels_test)
     display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
     # createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
 
@@ -396,6 +405,9 @@ def run_pipeline():
     td_name = trade_model_name + '_halvedLabels'
     display_test_results1(trade_model, test_features, trade_labels_test, td_name)
     # createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
+
+
+run_pipeline()
 
 
 """
