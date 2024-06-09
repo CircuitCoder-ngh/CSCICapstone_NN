@@ -16,9 +16,9 @@ then feeds predicted features output along w/ the data into a sequential model o
 fully connected dense layers (320, 160, 80, 2) that predicts max upward and downward 
 changes that will occur in the upcoming window """
 
-delta_model_name = 'deltaModel1'
 encoder_name = 'autoencoder1'
-trade_model_name = 'tradeModel2'
+delta_model_name = 'deltaModel1e'
+trade_model_name = 'tradeModel1b'
 group_name = 'groupCNNa'
 threshold = 0.7
 trade_window = 12  # distance to predict price delta and trade opportunity
@@ -30,51 +30,58 @@ d_batch_size = 12
 t_epochs = 200  # for trade model
 t_batch_size = 12
 desired_delta = 1
+retrain_encoder = False
+retrain_delta_model = False
+retrain_trade_model = False
 
-# retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
-data = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
 
-# drop vals to not use
-np.delete(data, 5, axis=1)  # removes vol
-np.delete(data, 4, axis=1)   # removes low
-np.delete(data, 3, axis=1)   # removes high
-np.delete(data, 2, axis=1)   # removes open
+def normalizeData():
+    # retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
+    data = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
 
-# convert date into timestamp then into 'time of day' indicator
-for item in data:
-    day = 24 * 60 * 60
-    item[0] = datetime.datetime.strptime(item[0], '%Y-%m-%d %H:%M:%S').timestamp()
-    item[0] = np.sin(item[0] * (2 * np.pi / day))
+    # drop vals to not use
+    np.delete(data, 5, axis=1)  # removes vol
+    np.delete(data, 4, axis=1)   # removes low
+    np.delete(data, 3, axis=1)   # removes high
+    np.delete(data, 2, axis=1)   # removes open
 
-# Convert to pd dataFrame to compute delta values
-df = pd.DataFrame(data)
-print(df)
-df.drop(columns=[0], inplace=True)
-print(df)
-df = df.astype(float)
-unscaled_data = df.copy()
-delta_df = df.diff().fillna(0)  # Fill NaN values with 0 for the first row
+    # convert date into timestamp then into 'time of day' indicator
+    for item in data:
+        day = 24 * 60 * 60
+        item[0] = datetime.datetime.strptime(item[0], '%Y-%m-%d %H:%M:%S').timestamp()
+        item[0] = np.sin(item[0] * (2 * np.pi / day))
 
-# Convert delta values back to NumPy array
-delta_data = delta_df.to_numpy()
+    # Convert to pd dataFrame to compute delta values
+    df = pd.DataFrame(data)
+    print(df)
+    df.drop(columns=[0], inplace=True)
+    print(df)
+    df = df.astype(float)
+    unscaled_data = df.copy()
+    delta_df = df.diff().fillna(0)  # Fill NaN values with 0 for the first row
 
-# Drop delta_data: time; Drop data: close
-np.delete(delta_data, 0, axis=1)
-np.delete(data, 1, axis=1)
+    # Convert delta values back to NumPy array
+    delta_data = delta_df.to_numpy()
 
-# Concatenate original data and delta values along the feature axis
-combined_data = np.concatenate((data, delta_data), axis=1)
-cd_df = pd.DataFrame(combined_data)
-cd_df.dropna()
-combined_data = cd_df.to_numpy()
-print(combined_data)
-# listToCSV(combined_data, f'historical_data/{group_name}_data/combined_data.csv')
-combined_data = csvToList('historical_data/groupCNNa_data/combined_data.csv')
+    # Drop delta_data: time; Drop data: close
+    np.delete(delta_data, 0, axis=1)
+    np.delete(data, 1, axis=1)
 
-# Normalize the data
-# ex. if x has domain [-5,5], scaling [0,1] will turn -2 into a 0.3 (negative vals under 0.5 if even distribution)
-scaler = MinMaxScaler()
-scaled_data = scaler.fit_transform(combined_data)
+    # Concatenate original data and delta values along the feature axis
+    combined_data = np.concatenate((data, delta_data), axis=1)
+    cd_df = pd.DataFrame(combined_data)
+    cd_df.dropna()
+    combined_data = cd_df.to_numpy()
+    print(combined_data)
+    # listToCSV(combined_data, f'historical_data/{group_name}_data/combined_data.csv')
+    combined_data = csvToList('historical_data/groupCNNa_data/combined_data.csv')
+
+    # Normalize the data
+    # ex. if x has domain [-5,5], scaling [0,1] will turn -2 into a 0.3 (negative vals under 0.5 if even distribution)
+    scaler = MinMaxScaler()
+    scaled_data = scaler.fit_transform(combined_data)
+
+    return unscaled_data, scaled_data
 
 
 # Create dataset function (preps data for CNN autoencoder and labels for delta_model)
@@ -186,7 +193,6 @@ def createConfusionMatrices(model, model_name, group_name, t_data, t_labels, thr
     plt.close()
     # plt.show()
 
-
 # Example usage:
 # Assuming trade_model, test_combined, and y_test are defined as in the previous code
 # display_test_results1(trade_model, test_combined, y_test)
@@ -220,113 +226,177 @@ def display_test_results2(model, test_data, test_labels):
 # display_test_results2(model, X_test, y_test)
 
 
-# TODO: put everything below into a function
+def get_encoder(num_inputs, X_train, X_test):
+    # Define the CNN Autoencoder model
+    input_layer = Input(shape=(window_size, num_inputs))  # window_size * # of inputs
+    print(f'input_layer = {input_layer}')
 
-# ----create training/test data (X) and training/test labels (y)----
-X, y, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta)
-# # csv_file_path = f'historical_data/groupCNNa_data/max_up_labels_{trade_window}.csv'
-# # df_up = pd.DataFrame(max_upward)
-# # df_up.to_csv(csv_file_path, index=False)
-# max_upward = csvToList('historical_data/groupCNNa_data/max_up_labels_12.csv')
-# max_upward = np.array(max_upward)
-# # csv_file_path = f'histo   rical_data/groupCNNa_data/max_down_labels_{trade_window}.csv'
-# # df_down = pd.DataFrame(max_downward)
-# # df_down.to_csv(csv_file_path, index=False)
-# max_downward = csvToList('historical_data/groupCNNa_data/max_down_labels_12.csv')
-# max_downward = np.array(max_downward)
+    # Encoder
+    x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(input_layer)
+    x = MaxPooling1D(pool_size=2, padding='same')(x)
+    x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(x)
+    encoded = MaxPooling1D(pool_size=2, padding='same', name='encoded_layer')(x)
 
-# Split the data sequentially
-split_index = int(len(X) * 0.8)
-X_train, X_test = X[:split_index], X[split_index:]
-y_train, y_test = y[:split_index], y[split_index:]
-num_inputs = X_train.shape[2]  # TODO: confirm this is correct, should equal num of inputs
-print(f'X_train shape: {X_train.shape} ...is [2] == num of inputs?')
-print(f'y_train shape: {y_train.shape} ...is [0] == X_train[0]')
-print(f'X_test shape: {X_test.shape}')
-print(f'y_test shape: {y_test.shape}')
-print(f'num inputs: {num_inputs}')
+    # Decoder
+    x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(encoded)
+    x = UpSampling1D(size=2)(x)
+    x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(x)
+    x = UpSampling1D(size=2)(x)
+    decoded = Conv1D(filters=num_inputs, kernel_size=3, activation='sigmoid', padding='same')(x)
 
-# Define the CNN Autoencoder model
-# input_layer = Input(shape=(window_size, num_inputs))  # window_size * # of inputs
-# print(f'input_layer = {input_layer}')
+    # Compile the model
+    autoencoder = Model(input_layer, decoded)
+    # autoencoder.compile(optimizer='adam', loss='mse')
 
-# # Encoder
-# x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(input_layer)
-# x = MaxPooling1D(pool_size=2, padding='same')(x)
-# x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(x)
-# encoded = MaxPooling1D(pool_size=2, padding='same', name='encoded_layer')(x)
-#
-# # Decoder
-# x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(encoded)
-# x = UpSampling1D(size=2)(x)
-# x = Conv1D(filters=32, kernel_size=3, activation='relu', padding='same')(x)
-# x = UpSampling1D(size=2)(x)
-# decoded = Conv1D(filters=num_inputs, kernel_size=3, activation='sigmoid', padding='same')(x)
-#
-# # Compile the model
-# autoencoder = Model(input_layer, decoded)
-# autoencoder.compile(optimizer='adam', loss='mse')
-#
-# # Train the autoencoder
-# autoencoder.fit(X_train, X_train, epochs=ae_epochs, batch_size=ae_batch_size, validation_data=(X_test, X_test))
-# autoencoder.save(f'models/{group_name}/{encoder_name}.keras')
-#
-# # Print evaluation of the autoencoder
-# train_loss = autoencoder.evaluate(X_train, X_train)
-# print(f"Training Loss: {train_loss}")
-# test_loss = autoencoder.evaluate(X_test, X_test)
-# print(f"Test Loss: {test_loss}")
-#
-# # Create/Load the encoder model
-ae_model = keras.models.load_model(f'models/{group_name}/autoencoder1.keras')
-print('ae model summary: ')
-ae_model.summary()
-encoder = Model(ae_model.input, ae_model.get_layer('max_pooling1d_1').output)
-# encoder = Model(input_layer, encoded)
-#
-# # Encode the train and test data
-encoded_train = encoder.predict(X_train)
-encoded_test = encoder.predict(X_test)
-#
-# # Flatten encoded features
-encoded_train_flat = encoded_train.reshape(encoded_train.shape[0], -1)
-encoded_test_flat = encoded_test.reshape(encoded_test.shape[0], -1)
-#
-# # Combine encoded features with raw data
-train_combined = np.hstack((encoded_train_flat, X_train[:, -1, :]))
-test_combined = np.hstack((encoded_test_flat, X_test[:, -1, :]))
-#
-print(f'train_combined shape: {train_combined.shape}')
-print(f'y_train shape: {y_train.shape}')
-print(f'test_combined shape: {test_combined.shape}')
-print(f'y_test shape: {y_test.shape}')
-#
-# # Define the price delta prediction model
-# # [samples, window_size / 4, # filters in last CNN]
-# #          -flatten & concat-> [samples, (20 / 4 * 64 = 320) + # of features] -> [samples, 320 + # of features]
-delta_model = Sequential([
-    Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
-    Dropout(0.5),
-    Dense(160, activation='relu'),
-    Dropout(0.5),
-    Dense(80, activation='relu'),
-    Dropout(0.5),
-    Dense(2, activation='linear')
-])
+    # Train the autoencoder
+    # autoencoder.fit(X_train, X_train, epochs=ae_epochs, batch_size=ae_batch_size, validation_data=(X_test, X_test))
+    # autoencoder.save(f'models/{group_name}/{encoder_name}.keras')
 
-# Compile the model
-# delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-#
-# # Define early stopping callback
-# early_stopping = EarlyStopping(monitor='val_loss', patience=100, restore_best_weights=True)
-#
-# # Train the model
-# delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
-#                 validation_data=(test_combined, y_test), callbacks=[early_stopping])
-# delta_model.save(f'models/{group_name}/{delta_model_name}e.keras')
-delta_model = keras.models.load_model(f'models/{group_name}/deltaModel1e.keras')
+    # Print evaluation of the autoencoder
+    train_loss = autoencoder.evaluate(X_train, X_train)
+    print(f"Training Loss: {train_loss}")
+    test_loss = autoencoder.evaluate(X_test, X_test)
+    print(f"Test Loss: {test_loss}")
+    #
+    # # Create/Load the encoder model
+    ae_model = keras.models.load_model(f'models/{group_name}/autoencoder1.keras')
+    print('ae model summary: ')
+    ae_model.summary()
+    encoder = Model(ae_model.input, ae_model.get_layer('max_pooling1d_1').output)
+    # encoder = Model(input_layer, encoded)
 
-# display_test_results2(delta_model, test_combined, y_test)
+    return encoder
+
+
+def get_delta_model(train_combined, y_train, test_combined, y_test):
+    # # Define the price delta prediction model
+    # # [samples, window_size / 4, # filters in last CNN]
+    # #          -flatten & concat-> [samples, (20 / 4 * 64 = 320) + # of features] -> [samples, 320 + # of features]
+    delta_model = Sequential([
+        Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
+        Dropout(0.5),
+        Dense(160, activation='relu'),
+        Dropout(0.5),
+        Dense(80, activation='relu'),
+        Dropout(0.5),
+        Dense(2, activation='linear')
+    ])
+
+    # Compile the model
+    # delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    #
+    # # Define early stopping callback
+    # early_stopping = EarlyStopping(monitor='val_loss', patience=100, restore_best_weights=True)
+    #
+    # # Train the model
+    # delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
+    #                 validation_data=(test_combined, y_test), callbacks=[early_stopping])
+    # delta_model.save(f'models/{group_name}/{delta_model_name}e.keras')
+    delta_model = keras.models.load_model(f'models/{group_name}/deltaModel1e.keras')
+
+    return delta_model
+
+
+def get_trade_model(train_features, trade_labels_train, test_features, trade_labels_test):
+    trade_model = Sequential([
+        Dense(340, activation='relu', input_shape=(train_features.shape[1],)),
+        Dropout(0.5),
+        Dense(170, activation='relu'),
+        Dropout(0.5),
+        Dense(85, activation='relu'),
+        Dropout(0.5),
+        Dense(1, activation='sigmoid')  # Assuming binary classification for trade opportunity
+    ])
+
+    # trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
+    #
+    # # Define early stopping callback
+    # early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
+    #
+    # # Train the trade model
+    # history = trade_model.fit(
+    #     train_features, trade_labels_train,
+    #     epochs=t_epochs,
+    #     batch_size=t_batch_size,
+    #     validation_data=(test_features, trade_labels_test),
+    #     callbacks=[early_stopping]
+    # )
+    #
+    # td_name = f'{trade_model_name}b'  # shouldn't rename w/n function
+    # trade_model.save(f'models/{group_name}/{td_name}.keras')
+
+    # Load desired model
+    trade_model = keras.models.load_model(f'models/{group_name}/{trade_model_name}.keras')
+
+    return trade_model
+
+
+def run_pipeline():
+    # ----create training/test data (X) and training/test labels (y)----
+    unscaled_data, scaled_data = normalizeData()
+    X, y, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta)
+
+    # Split the data sequentially
+    split_index = int(len(X) * 0.8)
+    X_train, X_test = X[:split_index], X[split_index:]
+    y_train, y_test = y[:split_index], y[split_index:]
+    num_inputs = X_train.shape[2]
+    print(f'X_train shape: {X_train.shape} ...is [2] == num of inputs?')
+    print(f'y_train shape: {y_train.shape} ...is [0] == X_train[0]')
+    print(f'X_test shape: {X_test.shape}')
+    print(f'y_test shape: {y_test.shape}')
+    print(f'num inputs: {num_inputs}')
+
+    encoder = get_encoder(num_inputs, X_train, X_test)
+    # Encode the train and test data
+    encoded_train = encoder.predict(X_train)
+    encoded_test = encoder.predict(X_test)
+
+    # Flatten encoded features
+    encoded_train_flat = encoded_train.reshape(encoded_train.shape[0], -1)
+    encoded_test_flat = encoded_test.reshape(encoded_test.shape[0], -1)
+
+    # Combine encoded features with raw data
+    train_combined = np.hstack((encoded_train_flat, X_train[:, -1, :]))
+    test_combined = np.hstack((encoded_test_flat, X_test[:, -1, :]))
+
+    print(f'train_combined shape: {train_combined.shape}')
+    print(f'y_train shape: {y_train.shape}')
+    print(f'test_combined shape: {test_combined.shape}')
+    print(f'y_test shape: {y_test.shape}')
+
+    # Get delta model
+    delta_model = get_delta_model(train_combined, y_train, test_combined, y_test)
+    # display_test_results2(delta_model, test_combined, y_test)
+
+    # Get delta model predictions
+    predicted_deltas_train = delta_model.predict(train_combined)
+    predicted_deltas_test = delta_model.predict(test_combined)
+
+    # Combine (encoded features + X data) with predicted deltas for the trade model
+    train_features = np.hstack(
+        (train_combined, predicted_deltas_train))  # changed from encoded_train_flat in tradeModel1
+    test_features = np.hstack((test_combined, predicted_deltas_test))  # changed from encoded_test_flat for tradeModel1b
+
+    # Split trading labels into train and test set
+    trade_labels_train, trade_labels_test = z[:split_index], z[split_index:]
+
+    print(f'train_features shape: {train_features.shape}')
+    print(f'test_features shape: {test_features.shape}')
+    print(f'trade_labels_train shape: {trade_labels_train.shape}')
+    print(f'trade_labels_test shape: {trade_labels_test.shape}')
+
+    trade_model = get_trade_model(train_features, trade_labels_train, test_features, trade_labels_test)
+    display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
+    # createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
+
+    # Testing model
+    t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
+    trade_labels_test = z[split_index:]
+    td_name = trade_model_name + '_halvedLabels'
+    display_test_results1(trade_model, test_features, trade_labels_test, td_name)
+    # createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
+
 
 """
 inputs for delta model:
@@ -355,60 +425,7 @@ question: is CNN getting data[i:i+window_size] and being used to predict delta p
 or is it being used to predict delta price for (i+window_size)+trade_window ? 
 """
 
-predicted_deltas_train = delta_model.predict(train_combined)
-predicted_deltas_test = delta_model.predict(test_combined)
 
-# Combine (encoded features + X data) with predicted deltas for the trade model
-train_features = np.hstack((train_combined, predicted_deltas_train))  # changed from encoded_train_flat in tradeModel1
-test_features = np.hstack((test_combined, predicted_deltas_test))  # changed from encoded_test_flat for tradeModel1b
-
-# Split trading labels into train and test set
-trade_labels_train, trade_labels_test = z[:split_index], z[split_index:]
-
-print(f'train_features shape: {train_features.shape}')
-print(f'test_features shape: {test_features.shape}')
-print(f'trade_labels_train shape: {trade_labels_train.shape}')
-print(f'trade_labels_test shape: {trade_labels_test.shape}')
-
-
-trade_model = Sequential([
-    Dense(340, activation='relu', input_shape=(train_features.shape[1],)),
-    Dropout(0.5),
-    Dense(170, activation='relu'),
-    Dropout(0.5),
-    Dense(85, activation='relu'),
-    Dropout(0.5),
-    Dense(1, activation='sigmoid')  # Assuming binary classification for trade opportunity
-])
-
-# trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
-#
-# # Define early stopping callback
-# early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
-#
-# # Train the trade model
-# history = trade_model.fit(
-#     train_features, trade_labels_train,
-#     epochs=t_epochs,
-#     batch_size=t_batch_size,
-#     validation_data=(test_features, trade_labels_test),
-#     callbacks=[early_stopping]
-# )
-#
-trade_model_name = trade_model_name + 'b'
-# trade_model.save(f'models/{group_name}/{trade_model_name}.keras')
-
-# Load desired model
-trade_model = keras.models.load_model(f'models/{group_name}/tradeModel1b.keras')
-display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
-# createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
-
-# Testing model
-t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
-trade_labels_test = z[split_index:]
-trade_model_name = trade_model_name + '_halvedLabels'
-display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
-# createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
 
 """
 to use live:
@@ -418,6 +435,7 @@ to use live:
     trade_model predict (-1)
 
 ** recreate live data backtesting by providing limited data at each point (is this already accomplished?)
+- put everything into a fn
 """
 
 # # Predict trade opportunities using the trade model
