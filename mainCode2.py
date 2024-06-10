@@ -3,10 +3,10 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from keras.models import Model, Sequential
-from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Flatten, Dropout
+from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Flatten, Dropout, LSTM
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
-from mainCode import csvToArray, createConfusionMatrix, listToCSV, csvToList
+from mainCode import csvToArray, createConfusionMatrix, listToCSV, csvToList, create3dDataset
 from tensorflow import keras
 from keras.callbacks import EarlyStopping
 import datetime
@@ -17,10 +17,15 @@ fully connected dense layers (320, 160, 80, 2) that predicts max upward and down
 changes that will occur in the upcoming window """
 
 encoder_name = 'autoencoder1'
-delta_model_name = 'deltaModel1e'
-trade_model_name = 'tradeModel1b_upOnly'
+delta_model_name = 'deltaModel2'
+trade_model_name = 'tradeModel3'
+one_output = False
 group_name = 'groupCNNa'
-threshold = 0.7
+lstm_units = 320
+look_back = 3
+threshold = 0.3  # default 0.7
+up_threshold = 0.7
+down_threshold = 0.7
 trade_window = 12  # distance to predict price delta and trade opportunity
 window_size = 20  # window size (for CNN lookback)
 ae_epochs = 200  # for autoencoder
@@ -30,9 +35,11 @@ d_batch_size = 12
 t_epochs = 200  # for trade model
 t_batch_size = 12
 desired_delta = 1
-patience = 20
+patience = 30
+d_num_of_lstm = 1
+t_num_of_lstm = 1
 retrain_encoder = False
-retrain_delta_model = False
+retrain_delta_model = True
 retrain_trade_model = True
 
 
@@ -91,7 +98,7 @@ def create_dataset(data, window_size, unscaled_data, trade_window, desired_delta
     y = []
     z = []
     max_upward, max_downward = calculate_max_changes(unscaled_data, trade_window)
-    trade_labels = create_trade_labels(unscaled_data, trade_window, desired_delta)
+    trade_labels = create_trade_labels(unscaled_data, trade_window, desired_delta, one_output)
     # currently contains unscaled delta vals
     # y = np.vstack((max_upward, max_downward)).T
     # print('y: ')
@@ -125,7 +132,7 @@ def calculate_max_changes(data, trade_window):
     return np.array(max_upward_changes), np.array(max_downward_changes)
 
 
-def create_trade_labels(data, trade_window, desired_delta):
+def create_trade_labels(data, trade_window, desired_delta, one_output):
     """looks into the future 'trade_window' and says whether good trade available"""
     up_labels = []
     down_labels = []
@@ -134,16 +141,16 @@ def create_trade_labels(data, trade_window, desired_delta):
         initial_price = data.iloc[i, 0]  # Assuming the price is the first feature
         for j in range(1, trade_window + 1):
             future_price = data.iloc[i + j, 0]
-            if future_price >= initial_price + desired_delta:
+            if future_price >= initial_price + desired_delta:  # identifies winning up trades
                 up_labels.append(1)
                 down_labels.append(0)
                 labels.append(1)
                 break
-            # elif future_price <= initial_price - desired_delta:
-            #     up_labels.append(0)
-            #     down_labels.append(1)
-            #     labels.append(1)
-            #     break
+            elif future_price <= initial_price - desired_delta:  # identifies winning down trades
+                up_labels.append(0)
+                down_labels.append(1)
+                labels.append(1)
+                break
             elif j == trade_window:
                 up_labels.append(0)
                 down_labels.append(0)
@@ -154,43 +161,69 @@ def create_trade_labels(data, trade_window, desired_delta):
     labels = np.array(labels)
     combined_labels = np.column_stack((up_labels, down_labels))
 
-    return labels  # return 'combined_samples' for 2 outputs, or 'labels' for 1 output
+    # return 'combined_labels' for 2 outputs, or 'labels' for 1 output
+    if one_output:
+        return labels
+    else:
+        return combined_labels
 
 
 def display_test_results1(model, test_data, test_labels, trade_model_name):
-    """for displaying results of trade opportunity model"""
+    """for displaying results of trade opportunity model w/ 1 output"""
     # Evaluate the model on the test data
-    model.evaluate(test_data, test_labels, verbose=0)
+    # model.evaluate(test_data, test_labels, verbose=0)
 
+    t_name = f'{trade_model_name}_{threshold}'
     # Create and save confusion matrix
-    createConfusionMatrix(model, model_name=trade_model_name, group_name=group_name, t_data=test_data,
+    createConfusionMatrix(model, model_name=t_name, group_name=group_name, t_data=test_data,
                           t_labels=test_labels, threshold=threshold)
 
 
 def createConfusionMatrices(model, model_name, group_name, t_data, t_labels, threshold):
-    """Creates and saves a confusion matrix
+    """Creates and saves two confusion matrices to display results of trade opp model w/ 2 outputs
     Parameters: model, a chosen name for the model, the group name, and test data appropriate for the model"""
-    predictions = model.predict(t_data)
+    predictions = model.predict(t_data)  # .reshape(-1)
     up_predictions = predictions[:, 0]
     down_predictions = predictions[:, 1]
+    print(f'predictions: {predictions}')
+    print(f'up_pred: {up_predictions}')
+    print(f'down_pred: {down_predictions}')
+
+    # loss, prec = model.evaluate(t_data, t_labels, verbose=0)
+
+    # debugging - realized threshold is too high so predictions aren't getting rounded to 1
+    # for p, t in zip(predictions, t_labels):
+    #     print(f'predicted: {p}')
+    #     print(f'actual___: {t}')
+
+    scaler = MinMaxScaler()
+    up_predictions = up_predictions.reshape(-1, 1)
+    down_predictions = down_predictions.reshape(-1, 1)
+    print(f'up_pred: {up_predictions}')
+    print(f'down_pred: {down_predictions}')
+
+    scaled_up_predictions = scaler.fit_transform(up_predictions)
+    # scaled_up_predictions = np.array(scaled_up_predictions)
+
+    scaled_down_predictions = scaler.fit_transform(down_predictions)
 
     # Round to 0 or 1 based on the threshold
-    binary_predictions = (predictions > threshold).astype(int)
-    binary_up_predictions = np.where(up_predictions >= threshold, 1, 0)
-    binary_down_predictions = np.where(down_predictions >= threshold, 1, 0)
+    # binary_predictions = (predictions > threshold).astype(int)
+    binary_up_predictions = np.where(scaled_up_predictions >= up_threshold, 1, 0)
+    binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
 
     cm = confusion_matrix(y_true=t_labels[:, 0], y_pred=binary_up_predictions)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
-    plt.title("Confusion Matrix for Upside Trades")
-    plt.savefig(f'models/{group_name}cm/{model_name}_upCM.png')
+    plt.title("Confusion Matrix for Longs")
+    plt.savefig(f'models/{group_name}cm/{model_name}_upCM_s{up_threshold}.png')  # 's' to rep scaled labels
     plt.close()
 
     cm = confusion_matrix(y_true=t_labels[:, 1], y_pred=binary_down_predictions)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
-    plt.title("Confusion Matrix for Downside Trades")
-    plt.savefig(f'models/{group_name}cm/{model_name}_downCM.png')
+    plt.title("Confusion Matrix for Shorts")
+    plt.savefig(f'models/{group_name}cm/{model_name}_downCM_s{down_threshold}.png')
     plt.close()
     # plt.show()
 
@@ -278,8 +311,22 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
     # # [samples, window_size / 4, # filters in last CNN]
     # #          -flatten & concat-> [samples, (20 / 4 * 64 = 320) + # of features] -> [samples, 320 + # of features]
     if retrain:
+        # delta_model = Sequential([  # used for deltaModel1
+        #     Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
+        #     Dropout(0.5),
+        #     Dense(160, activation='relu'),
+        #     Dropout(0.5),
+        #     Dense(80, activation='relu'),
+        #     Dropout(0.5),
+        #     Dense(2, activation='linear')
+        # ])
+        if d_num_of_lstm > 0:
+            train_combined, y_train = create3dDataset(train_combined, y_train, look_back)
+            test_combined, y_test = create3dDataset(test_combined, y_test, look_back)
         delta_model = Sequential([
-            Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
+            LSTM(lstm_units, activation='relu', input_shape=(train_combined.shape[1], train_combined.shape[2]),
+                 return_sequences=False),  # , kernel_constraint=max_norm(kc)
+            Dense(320, activation='relu'),
             Dropout(0.5),
             Dense(160, activation='relu'),
             Dropout(0.5),
@@ -307,14 +354,28 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
 
 def get_trade_model(retrain, train_features, trade_labels_train, test_features, trade_labels_test):
     if retrain:
+        # trade_model = Sequential([
+        #     Dense(340, activation='relu', input_shape=(train_features.shape[1],)),
+        #     Dropout(0.5),
+        #     Dense(170, activation='relu'),
+        #     Dropout(0.5),
+        #     Dense(85, activation='relu'),
+        #     Dropout(0.5),
+        #     Dense(1, activation='sigmoid')  # Assuming binary classification for trade opportunity
+        # ])
+        if t_num_of_lstm > 0:
+            train_combined, y_train = create3dDataset(train_features, trade_labels_train, look_back)
+            test_combined, y_test = create3dDataset(test_features, trade_labels_test, look_back)
         trade_model = Sequential([
-            Dense(340, activation='relu', input_shape=(train_features.shape[1],)),
+            LSTM(lstm_units, activation='relu', input_shape=(train_features.shape[1], train_features.shape[2]),
+                 return_sequences=False),  # , kernel_constraint=max_norm(kc)
+            Dense(340, activation='relu'),
             Dropout(0.5),
             Dense(170, activation='relu'),
             Dropout(0.5),
             Dense(85, activation='relu'),
             Dropout(0.5),
-            Dense(1, activation='sigmoid')  # Assuming binary classification for trade opportunity
+            Dense(2, activation='linear')
         ])
 
         trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
@@ -323,7 +384,7 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
         early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
 
         # Train the trade model
-        history = trade_model.fit(
+        trade_model.fit(
             train_features, trade_labels_train,
             epochs=t_epochs,
             batch_size=t_batch_size,
@@ -375,7 +436,7 @@ def run_pipeline():
 
     # Get delta model
     delta_model = get_delta_model(retrain_delta_model, train_combined, y_train, test_combined, y_test)
-    display_test_results2(delta_model, test_combined, y_test)
+    # display_test_results2(delta_model, test_combined, y_test)
 
     # Get delta model predictions
     predicted_deltas_train = delta_model.predict(train_combined)
@@ -396,15 +457,15 @@ def run_pipeline():
 
     # Get trade model
     trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features, trade_labels_test)
-    display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
-    # createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
+    # display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
+    createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
 
     # Testing model
     t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
     trade_labels_test = z[split_index:]
     td_name = trade_model_name + '_halvedLabels'
-    display_test_results1(trade_model, test_features, trade_labels_test, td_name)
-    # createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
+    # display_test_results1(trade_model, test_features, trade_labels_test, td_name)
+    createConfusionMatrices(trade_model, td_name, group_name, test_features, trade_labels_test, threshold)
 
 
 run_pipeline()
@@ -447,7 +508,8 @@ to use live:
     trade_model predict (-1)
 
 ** recreate live data backtesting by providing limited data at each point (is this already accomplished?)
-- put everything into a fn
+- change CM to save w/ threshold in name, retest model2 and model2b
+- create and test tradeModel1b_downOnly
 """
 
 # # Predict trade opportunities using the trade model
