@@ -17,12 +17,15 @@ fully connected dense layers (320, 160, 80, 2) that predicts max upward and down
 changes that will occur in the upcoming window """
 
 encoder_name = 'autoencoder1'
-delta_model_name = 'deltaModel2'
-trade_model_name = 'tradeModel3'
+delta_model_name = 'deltaModel2'  # 2=lb3, 3=lb12+u340
+trade_model_name = 'tradeModel6'
+# trade models: 3=lb3,4=lb12,5a=lb12+RSTRSF,5=RSTdoRSF+lessDenselayers, 6=moreDenseunits
 one_output = False
 group_name = 'groupCNNa'
-lstm_units = 320
-look_back = 3
+d_lstm_units = 320
+t_lstm_units = 340
+d_look_back = 3  # must match deltaModel's lookback
+t_look_back = 12   # must match tradeModel's lookback
 threshold = 0.3  # default 0.7
 up_threshold = 0.7
 down_threshold = 0.7
@@ -35,11 +38,11 @@ d_batch_size = 12
 t_epochs = 200  # for trade model
 t_batch_size = 12
 desired_delta = 1
-patience = 30
+patience = 3
 d_num_of_lstm = 1
 t_num_of_lstm = 1
 retrain_encoder = False
-retrain_delta_model = True
+retrain_delta_model = False
 retrain_trade_model = True
 
 
@@ -321,11 +324,13 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
         #     Dense(2, activation='linear')
         # ])
         if d_num_of_lstm > 0:
-            train_combined, y_train = create3dDataset(train_combined, y_train, look_back)
-            test_combined, y_test = create3dDataset(test_combined, y_test, look_back)
-        delta_model = Sequential([
-            LSTM(lstm_units, activation='relu', input_shape=(train_combined.shape[1], train_combined.shape[2]),
+            train_combined, y_train = create3dDataset(train_combined, y_train, d_look_back)
+            test_combined, y_test = create3dDataset(test_combined, y_test, d_look_back)
+        delta_model = Sequential([  # used for deltaModel2
+            LSTM(d_lstm_units, activation='relu', input_shape=(train_combined.shape[1], train_combined.shape[2]),
                  return_sequences=False),  # , kernel_constraint=max_norm(kc)
+            # output shape of LSTM: (batch_size, lstm_units), or for RST: (batch_size, timesteps, lstm_units)
+            # timesteps == train_combined.shape[1]
             Dense(320, activation='relu'),
             Dropout(0.5),
             Dense(160, activation='relu'),
@@ -344,7 +349,7 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
         # Train the model
         delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
                         validation_data=(test_combined, y_test), callbacks=[early_stopping])
-        delta_model.save(f'models/{group_name}/{delta_model_name}e.keras')
+        delta_model.save(f'models/{group_name}/{delta_model_name}.keras')
 
     else:  # Load the model
         delta_model = keras.models.load_model(f'models/{group_name}/{delta_model_name}.keras')
@@ -354,7 +359,7 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
 
 def get_trade_model(retrain, train_features, trade_labels_train, test_features, trade_labels_test):
     if retrain:
-        # trade_model = Sequential([
+        # trade_model = Sequential([  # used for tradeModel1
         #     Dense(340, activation='relu', input_shape=(train_features.shape[1],)),
         #     Dropout(0.5),
         #     Dense(170, activation='relu'),
@@ -364,19 +369,50 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
         #     Dense(1, activation='sigmoid')  # Assuming binary classification for trade opportunity
         # ])
         if t_num_of_lstm > 0:
-            train_combined, y_train = create3dDataset(train_features, trade_labels_train, look_back)
-            test_combined, y_test = create3dDataset(test_features, trade_labels_test, look_back)
-        trade_model = Sequential([
-            LSTM(lstm_units, activation='relu', input_shape=(train_features.shape[1], train_features.shape[2]),
+            train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
+            test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_look_back)
+        # trade_model = Sequential([
+        #     # used for tradeModel2,3,4; tradeModel3 had lookback 3, tradeModel4 had lookback 12
+        #     LSTM(t_lstm_units, activation='relu', input_shape=(train_features.shape[1], train_features.shape[2]),
+        #          return_sequences=False),  # , kernel_constraint=max_norm(kc)
+        #     Dense(340, activation='relu'),
+        #     Dropout(0.5),
+        #     Dense(170, activation='relu'),
+        #     Dropout(0.5),
+        #     Dense(85, activation='relu'),
+        #     Dropout(0.5),
+        #     Dense(2, activation='sigmoid')
+        # ])
+        trade_model = Sequential([  # made for tradeModel5,6
+            LSTM(t_lstm_units, activation='relu', input_shape=(train_features.shape[1], train_features.shape[2]),
                  return_sequences=False),  # , kernel_constraint=max_norm(kc)
-            Dense(340, activation='relu'),
+            # Dropout(0.5),
+            # LSTM(int(t_lstm_units/2), activation='relu', return_sequences=False),
+            # output shape of LSTM: (batch_size, lstm_units), or for RST: (batch_size, timesteps, lstm_units)
+            Dense(4080, activation='relu'),
             Dropout(0.5),
-            Dense(170, activation='relu'),
+            # Dense(1020, activation='relu'),
+            # Dropout(0.5),
+            # Dense(510, activation='relu'),
+            # Dropout(0.5),
+            # Dense(255, activation='relu'),
+            # Dropout(0.5),
+            # Dense(128, activation='relu'),
+            # Dropout(0.5),
+            Dense(64, activation='relu'),
             Dropout(0.5),
-            Dense(85, activation='relu'),
-            Dropout(0.5),
-            Dense(2, activation='linear')
+            Dense(2, activation='sigmoid')
         ])
+        # trade_model = Sequential([  # made for tradeModel7
+        #     Input(shape=(window_size, 7),
+        #     Conv1D(filters=32, kernel_size=3, activation='relu', padding='same'),
+        #     # Dropout(0.5),
+        #     Dense(4080, activation='relu'),
+        #     Dropout(0.5),
+        #     Dense(64, activation='relu'),
+        #     Dropout(0.5),
+        #     Dense(2, activation='sigmoid')
+        # ])
 
         trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
 
@@ -428,6 +464,8 @@ def run_pipeline():
     # Combine encoded features with raw data
     train_combined = np.hstack((encoded_train_flat, X_train[:, -1, :]))
     test_combined = np.hstack((encoded_test_flat, X_test[:, -1, :]))
+    # train_combined_cpy = train_combined.copy()
+    # test_combined_cpy = test_combined.copy()
 
     print(f'train_combined shape: {train_combined.shape}')
     print(f'y_train shape: {y_train.shape}')
@@ -436,6 +474,9 @@ def run_pipeline():
 
     # Get delta model
     delta_model = get_delta_model(retrain_delta_model, train_combined, y_train, test_combined, y_test)
+    if d_num_of_lstm > 0:
+        train_combined, y_train = create3dDataset(train_combined, y_train, d_look_back)
+        test_combined, y_test = create3dDataset(test_combined, y_test, d_look_back)
     # display_test_results2(delta_model, test_combined, y_test)
 
     # Get delta model predictions
@@ -443,29 +484,42 @@ def run_pipeline():
     predicted_deltas_test = delta_model.predict(test_combined)
 
     # Combine (encoded features + X data) with predicted deltas for the trade model
-    train_features = np.hstack(
-        (train_combined, predicted_deltas_train))  # changed from encoded_train_flat in tradeModel1
-    test_features = np.hstack((test_combined, predicted_deltas_test))  # changed from encoded_test_flat for tradeModel1b
+    if d_num_of_lstm > 0:
+        train_features = np.hstack(
+            (train_combined[:, -1, :], predicted_deltas_train))
+        test_features = np.hstack((test_combined[:, -1, :], predicted_deltas_test))
+    else:
+        train_features = np.hstack(
+            (train_combined, predicted_deltas_train))  # changed from encoded_train_flat in tradeModel1
+        test_features = np.hstack((test_combined, predicted_deltas_test))
+        # changed from encoded_test_flat for tradeModel1b
 
     # Split trading labels into train and test set
     trade_labels_train, trade_labels_test = z[:split_index], z[split_index:]
+    test_features2 = test_features.copy()
 
     print(f'train_features shape: {train_features.shape}')
     print(f'test_features shape: {test_features.shape}')
     print(f'trade_labels_train shape: {trade_labels_train.shape}')
     print(f'trade_labels_test shape: {trade_labels_test.shape}')
 
-    # Get trade model
+    # Get trade model and test it
     trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features, trade_labels_test)
+    if t_num_of_lstm > 0:
+        # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
+        test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_look_back)
     # display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
     createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
 
-    # Testing model
+    # Testing model w/ labels for half the desired delta
     t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
-    trade_labels_test = z[split_index:]
+    trade_labels_test2 = z[split_index:]
+    if t_num_of_lstm > 0:
+        # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
+        test_features2, trade_labels_test2 = create3dDataset(test_features2, trade_labels_test2, t_look_back)
     td_name = trade_model_name + '_halvedLabels'
     # display_test_results1(trade_model, test_features, trade_labels_test, td_name)
-    createConfusionMatrices(trade_model, td_name, group_name, test_features, trade_labels_test, threshold)
+    createConfusionMatrices(trade_model, td_name, group_name, test_features2, trade_labels_test2, threshold)
 
 
 run_pipeline()
