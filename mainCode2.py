@@ -17,14 +17,14 @@ fully connected dense layers (320, 160, 80, 2) that predicts max upward and down
 changes that will occur in the upcoming window """
 
 encoder_name = 'autoencoder1'
-delta_model_name = 'deltaModel2'  # 2=lb3, 3=lb12+u340
-trade_model_name = 'tradeModel6'
-# trade models: 3=lb3,4=lb12,5a=lb12+RSTRSF,5=RSTdoRSF+lessDenselayers, 6=moreDenseunits
+delta_model_name = 'deltaModel3'  # 2=lb3, 3=lb12+u340
+trade_model_name = 'tradeModel7'
+# trade models: 3=lb3,4=lb12,5a=lb12+RSTRSF,5=RSTdoRSF+lessDenselayers, 6=moreDenseunits, 7=deltaModel3
 one_output = False
 group_name = 'groupCNNa'
-d_lstm_units = 320
+d_lstm_units = 340
 t_lstm_units = 340
-d_look_back = 3  # must match deltaModel's lookback
+d_look_back = 12  # must match deltaModel's lookback
 t_look_back = 12   # must match tradeModel's lookback
 threshold = 0.3  # default 0.7
 up_threshold = 0.7
@@ -43,7 +43,7 @@ d_num_of_lstm = 1
 t_num_of_lstm = 1
 retrain_encoder = False
 retrain_delta_model = False
-retrain_trade_model = True
+retrain_trade_model = False
 
 
 def normalizeData():
@@ -331,10 +331,10 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
                  return_sequences=False),  # , kernel_constraint=max_norm(kc)
             # output shape of LSTM: (batch_size, lstm_units), or for RST: (batch_size, timesteps, lstm_units)
             # timesteps == train_combined.shape[1]
-            Dense(320, activation='relu'),
+            Dense(4080, activation='relu'),
             Dropout(0.5),
-            Dense(160, activation='relu'),
-            Dropout(0.5),
+            # Dense(160, activation='relu'),
+            # Dropout(0.5),
             Dense(80, activation='relu'),
             Dropout(0.5),
             Dense(2, activation='linear')
@@ -383,7 +383,7 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
         #     Dropout(0.5),
         #     Dense(2, activation='sigmoid')
         # ])
-        trade_model = Sequential([  # made for tradeModel5,6
+        trade_model = Sequential([  # made for tradeModel5,6,7
             LSTM(t_lstm_units, activation='relu', input_shape=(train_features.shape[1], train_features.shape[2]),
                  return_sequences=False),  # , kernel_constraint=max_norm(kc)
             # Dropout(0.5),
@@ -403,7 +403,7 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
             Dropout(0.5),
             Dense(2, activation='sigmoid')
         ])
-        # trade_model = Sequential([  # made for tradeModel7
+        # trade_model = Sequential([  # made for tradeModel8
         #     Input(shape=(window_size, 7),
         #     Conv1D(filters=32, kernel_size=3, activation='relu', padding='same'),
         #     # Dropout(0.5),
@@ -477,7 +477,7 @@ def run_pipeline():
     if d_num_of_lstm > 0:
         train_combined, y_train = create3dDataset(train_combined, y_train, d_look_back)
         test_combined, y_test = create3dDataset(test_combined, y_test, d_look_back)
-    # display_test_results2(delta_model, test_combined, y_test)
+    display_test_results2(delta_model, test_combined, y_test)
 
     # Get delta model predictions
     predicted_deltas_train = delta_model.predict(train_combined)
