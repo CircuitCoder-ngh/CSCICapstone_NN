@@ -20,12 +20,12 @@ encoder_name = 'autoencoder1'
 delta_model_name = 'deltaModel3'  # 2=lb3, 3=lb12+u340
 trade_model_name = 'tradeModel7'
 # trade models: 3=lb3,4=lb12,5a=lb12+RSTRSF,5=RSTdoRSF+lessDenselayers, 6=moreDenseunits, 7=deltaModel3
-one_output = False
+one_output = False  # used to indicate use of LSTM
 group_name = 'groupCNNa'
 d_lstm_units = 340
 t_lstm_units = 340
 d_look_back = 12  # must match deltaModel's lookback
-t_look_back = 12   # must match tradeModel's lookback
+t_look_back = 12  # must match tradeModel's lookback
 threshold = 0.3  # default 0.7
 up_threshold = 0.7
 down_threshold = 0.7
@@ -37,14 +37,13 @@ d_epochs = 200  # for delta model
 d_batch_size = 12
 t_epochs = 200  # for trade model
 t_batch_size = 12
-desired_delta = 0.5
+desired_delta = 0.5  # 1 for training, 0.5 for testing
 patience = 3
 d_num_of_lstm = 1
 t_num_of_lstm = 1
 retrain_encoder = False
 retrain_delta_model = False
 retrain_trade_model = False
-testing_mode1 = True
 
 
 def normalizeData(data):
@@ -52,9 +51,9 @@ def normalizeData(data):
     # print('-----------')
     # print(data)
     np.delete(data, 5, axis=1)  # removes vol
-    np.delete(data, 4, axis=1)   # removes low
-    np.delete(data, 3, axis=1)   # removes high
-    np.delete(data, 2, axis=1)   # removes open
+    np.delete(data, 4, axis=1)  # removes low
+    np.delete(data, 3, axis=1)  # removes high
+    np.delete(data, 2, axis=1)  # removes open
 
     # convert date into timestamp then into 'time of day' indicator
     for item in data:
@@ -100,7 +99,7 @@ def create_dataset(data, window_size, unscaled_data, trade_window, desired_delta
     X = []
     y = []
     z = []
-    if not future_unscaled_data is None:
+    if future_unscaled_data is not None:
         max_upward, max_downward = calculate_max_changes(future_unscaled_data, trade_window)
         trade_labels = create_trade_labels(future_unscaled_data, trade_window, desired_delta, one_output)
     else:
@@ -235,6 +234,7 @@ def createConfusionMatrices(model, model_name, group_name, t_data, t_labels, thr
     plt.close()
     # plt.show()
 
+
 # Example usage:
 # Assuming trade_model, test_combined, and y_test are defined as in the previous code
 # display_test_results1(trade_model, test_combined, y_test)
@@ -317,6 +317,7 @@ def display_test_results2(model, test_data, test_labels):
     plt.legend()
     # plt.savefig(f'models/{group_name}/')  # TODO: fix this
     plt.show()
+
 
 # Example usage of display_test_results
 # Assuming test_combined and y_test are defined as in the previous code
@@ -564,7 +565,8 @@ def run_pipeline(data):
     print(f'trade_labels_test shape: {trade_labels_test.shape}')
 
     # Get trade model and test it
-    trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features, trade_labels_test)
+    trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features,
+                                  trade_labels_test)
     if t_num_of_lstm > 0:
         # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
         test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_look_back)
@@ -646,7 +648,7 @@ raw_list = raw_list[split_index:]
 # position_start_time = i and position_start_price = closing_price[i]
 # if pst > 12 then close position; if closing_price[i] - position_start_price >== desired_delta then close position
 # if closing position then append to trade_history
-data_window_size = 300
+data_window_size = 5000
 starting_balance = 1000
 nopen_up_positions = 0
 nclosed_up_positions = 0
@@ -666,15 +668,14 @@ for i in range(len(raw_list) - data_window_size - trade_window):
     # splice data to only have 'data_window_size' samples
     raw_data1 = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[split_index:]  # [:-trade_window]
     raw_data2 = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[split_index:]  # [:-trade_window]
-    data_window = raw_data1[i:i+data_window_size]
-    future_data_window = raw_data2[i:i+data_window_size+trade_window]
+    data_window = raw_data1[i:i + data_window_size]
+    future_data_window = raw_data2[i:i + data_window_size + trade_window]
 
     # get data, labels, and predictions for current timestep (i+data_window_size)
     current_predictions, trade_labels_test = run_pipeline2(data_window, future_data_window)
 
     up_predictions = current_predictions[:, 0]
     down_predictions = current_predictions[:, 1]
-
 
     # loss, prec = model.evaluate(t_data, t_labels, verbose=0)
 
@@ -683,7 +684,7 @@ for i in range(len(raw_list) - data_window_size - trade_window):
     #     print(f'predicted: {p}')
     #     print(f'actual___: {t}')
 
-    scaler = MinMaxScaler()  # TODO: make run_pipeline2 return full predictions so it can be scaled here easier
+    scaler = MinMaxScaler()  # made run_pipeline2 return full predictions so it can be scaled here easier
     up_predictions = up_predictions.reshape(-1, 1)
     down_predictions = down_predictions.reshape(-1, 1)
 
@@ -769,8 +770,6 @@ question: is CNN getting data[i:i+window_size] and being used to predict delta p
 or is it being used to predict delta price for (i+window_size)+trade_window ? 
 """
 
-
-
 """
 to use live:
     get latest data (X)
@@ -799,4 +798,3 @@ to use live:
 # plt.title('Close Price with Trade Signals')
 # plt.legend()
 # plt.show()
-

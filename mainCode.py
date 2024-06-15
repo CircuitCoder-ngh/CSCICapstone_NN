@@ -119,7 +119,6 @@ def csvToList(filename):
     dataset = df.values.tolist()
     dataset.pop(0)
     # numeric_data = np.array(dataset)[:, 1:].astype(float)
-
     return dataset
 
 
@@ -218,7 +217,7 @@ def create3dDataset(dataset, data_labels, look_back):  # look_back must be 1 w/ 
     """Converts input tensor from 2d to 3d
     (intended to format data for LSTM layer)"""
     dataX, dataY = [], []
-    for i in range(len(dataset) - look_back - 1):
+    for i in range(len(dataset) - look_back):  # removed -1 after tradeModel7
         a = dataset[i:(i + look_back), :]  # [...:i, 0] would only add the val from col[0]
         dataX.append(a)
         dataY.append(data_labels[i + look_back])
@@ -403,22 +402,22 @@ def plotGroupResults(filename):
     # plt.close()
 
 
-def testRetrainModels(group_name, training_data, training_labels, prec, r_period, optional=None):
-    """tests out models w/ precision > 'prec' within 'group_name' by retraining every 'r_period' samples"""
-    path = f"models/{group_name}"
-    dirs = os.listdir(path)
-    groupresults = []
-
-    for file in dirs:
-        if file.endswith(".keras"):
-            print(file)
-            model = keras.models.load_model(f'models/{group_name}/{file}')
-            if model prec > prec:
-                config = model.get_config()  # Returns pretty much every information about your model
-                in_shape = config["layers"][0]["config"]["batch_input_shape"]
-                print(in_shape)  # returns a tuple of width, height and channels
-                if len(in_shape) > 2:
-                    train_data, train_labels = create3dDataset(training_data, training_labels, in_shape[1])
+# def testRetrainModels(group_name, training_data, training_labels, prec, r_period, optional=None):
+#     """tests out models w/ precision > 'prec' within 'group_name' by retraining every 'r_period' samples"""
+#     path = f"models/{group_name}"
+#     dirs = os.listdir(path)
+#     groupresults = []
+#
+#     for file in dirs:
+#         if file.endswith(".keras"):
+#             print(file)
+#             model = keras.models.load_model(f'models/{group_name}/{file}')
+#             if model prec > prec:
+#                 config = model.get_config()  # Returns pretty much every information about your model
+#                 in_shape = config["layers"][0]["config"]["batch_input_shape"]
+#                 print(in_shape)  # returns a tuple of width, height and channels
+#                 if len(in_shape) > 2:
+#                     train_data, train_labels = create3dDataset(training_data, training_labels, in_shape[1])
 
 
 
@@ -537,21 +536,21 @@ j = 0
 #                                            0.7, 1, 8, 3, 0, 10, 2, 8, 150, 6)
 # createNewModel('groupC', training_data, training_labels, test_data, test_labels,
 #                                            0.7, 1, 8, 3, 0, 10, 2, 8, 150, 6)
-ts, kc, ne, sb = 0.7, 10, 150, 12
-ld, ud = 1, 64
-for do in dropout:
-    for llstm in layers_LSTM:
-        for ulstm in units_LSTM:
-            for lblstm in lookback_LSTM:
-                # for ld in layers_Dense:
-                #     for ud in units_Dense:
-                        # for sb in size_batch:
-                        # if j < i:
-                        #     j += 1
-                        # else:
-                            createNewModel2('groupE', training_data, training_labels, test_data, test_labels,
-                                           ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb)
-print('GroupE has completed training!')
+# ts, kc, ne, sb = 0.7, 10, 150, 12
+# ld, ud = 1, 64
+# for do in dropout:
+#     for llstm in layers_LSTM:
+#         for ulstm in units_LSTM:
+#             for lblstm in lookback_LSTM:
+#                 # for ld in layers_Dense:
+#                 #     for ud in units_Dense:
+#                         # for sb in size_batch:
+#                         # if j < i:
+#                         #     j += 1
+#                         # else:
+#                             createNewModel2('groupE', training_data, training_labels, test_data, test_labels,
+#                                            ts, llstm, ulstm, lblstm, do, kc, ld, ud, ne, sb)
+# print('GroupE has completed training!')
 # ------------------------------------------------------ #
 """
 - make final 'fully connected layer' have neurons equal to ud *ld * ulstm * llstm
