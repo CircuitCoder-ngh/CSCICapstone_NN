@@ -6,20 +6,26 @@ from keras.models import Model, Sequential
 from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Flatten, Dropout, LSTM
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
-from mainCode import csvToArray, createConfusionMatrix, listToCSV, csvToList, create3dDataset
+from mainCode import csvToArray, createConfusionMatrix, listToCSV, csvToList, create3dDataset, combineDataToCSV
 from tensorflow import keras
 from keras.callbacks import EarlyStopping
-import datetime
+import datetime, time, schedule
+import discord
+import requests
 
 """Creates a CNN autoencoder (32/3, 2, 64/3, 2) to learn patterns in the data,
 then feeds predicted features output along w/ the data into a sequential model of 
-fully connected dense layers (320, 160, 80, 2) that predicts max upward and downward 
-changes that will occur in the upcoming window """
+fully connected dense layers that predicts max upward and downward 
+changes that will occur in the upcoming trade window, then feeds both of these
+ predicted features and outputs into another sequential model of fully connected 
+ dense layers that predicts whether or not the desired upward or downward price
+ change will occur in the upcoming trade window"""
 
-encoder_name = 'autoencoder1'
-delta_model_name = 'deltaModel3'  # 2=lb3, 3=lb12+u340
-trade_model_name = 'tradeModel7'
-# trade models: 3=lb3,4=lb12,5a=lb12+RSTRSF,5=RSTdoRSF+lessDenselayers, 6=moreDenseunits, 7=deltaModel3
+encoder_name = 'autoencoder2'  # 1=window20, 2=window40, 3=window80+batchsize12
+delta_model_name = 'deltaModel4'  # 2=lb3, 3=lb12+u340, 4=tradewindow6+ae2, 5=ae3
+trade_model_name = 'tradeModel8'
+# trade models: 3=lb3,4=lb12,5a=lb12+RSTRSF,5=RSTdoRSF+lessDenselayers, 6=moreDenseunits, 7=deltaModel3, 8=tw6+ae2+dm4,
+# 9=ae4+dm5
 one_output = False  # used to indicate use of LSTM
 group_name = 'groupCNNa'
 d_lstm_units = 340
@@ -29,16 +35,16 @@ t_look_back = 12  # must match tradeModel's lookback
 threshold = 0.3  # default 0.7
 up_threshold = 0.7
 down_threshold = 0.7
-trade_window = 12  # distance to predict price delta and trade opportunity
-window_size = 20  # window size (for CNN lookback)
+trade_window = 6  # 12  # distance to predict price delta and trade opportunity
+window_size = 40  # window size (for CNN lookback)
 ae_epochs = 200  # for autoencoder
-ae_batch_size = 6
+ae_batch_size = 12  # 6
 d_epochs = 200  # for delta model
 d_batch_size = 12
 t_epochs = 200  # for trade model
 t_batch_size = 12
-desired_delta = 0.5  # 1 for training, 0.5 for testing
-patience = 3
+desired_delta = 1  # 1 for training, 0.5 for testing
+patience = 5
 d_num_of_lstm = 1
 t_num_of_lstm = 1
 retrain_encoder = False
@@ -95,24 +101,28 @@ def normalizeData(data):
 
 
 # Create dataset function (preps data for CNN autoencoder and labels for delta_model)
-def create_dataset(data, window_size, unscaled_data, trade_window, desired_delta, future_unscaled_data):
+def create_dataset(data, window_size, unscaled_data, trade_window, desired_delta, future_unscaled_data=None):
     X = []
     y = []
     z = []
     if future_unscaled_data is not None:
         max_upward, max_downward = calculate_max_changes(future_unscaled_data, trade_window)
         trade_labels = create_trade_labels(future_unscaled_data, trade_window, desired_delta, one_output)
+        for i in range(len(data) - window_size):  # '- trade_window' before testMode1
+            X.append(data[i:i + window_size])
+            y.append([max_upward[i + window_size], max_downward[i + window_size]])
+            z.append(trade_labels[i + window_size])
     else:
         max_upward, max_downward = calculate_max_changes(unscaled_data, trade_window)
         trade_labels = create_trade_labels(unscaled_data, trade_window, desired_delta, one_output)
+        for i in range(len(data) - window_size - trade_window):
+            X.append(data[i:i + window_size])
+            y.append([max_upward[i + window_size], max_downward[i + window_size]])
+            z.append(trade_labels[i + window_size])
     # currently contains unscaled delta vals
     # y = np.vstack((max_upward, max_downward)).T
     # print('y: ')
     # print(y)
-    for i in range(len(data) - window_size):  # '- trade_window' before testMode1
-        X.append(data[i:i + window_size])
-        y.append([max_upward[i + window_size], max_downward[i + window_size]])
-        z.append(trade_labels[i + window_size])
 
     dataX = np.array(X)
     dataY = np.array(y)
@@ -123,6 +133,15 @@ def create_dataset(data, window_size, unscaled_data, trade_window, desired_delta
 
     return dataX, dataY, dataZ
 
+
+# Create dataset function (preps data for CNN autoencoder and labels for delta_model)
+def create_X_dataset(data, window_size, unscaled_data, trade_window, desired_delta):
+    X = []
+    max_upward, max_downward = calculate_max_changes(unscaled_data, trade_window)
+    trade_labels = create_trade_labels(unscaled_data, trade_window, desired_delta, one_output)
+    for i in range(len(data) - window_size - trade_window):
+        X.append(data[i:i + window_size])
+    return np.array(X)
 
 # calculates the max upward and max downward changes
 def calculate_max_changes(data, trade_window):
@@ -280,6 +299,10 @@ def plot_signals_chart(trade_model, unscaled_data, features, split_index):
     print(f'down_marker_indices: {down_marker_indices}')
     print(f'closing_prices.iloc[up_marker_indices: {closing_prices.iloc[up_marker_indices]}')
     print(f'closing_prices.iloc[down_marker_indices: {closing_prices.iloc[down_marker_indices]}')
+    print(f'len closing_prices: {len(closing_prices)}')
+    print(f'len binup predictions: {len(binary_up_predictions)}')
+    print(f'len features: {len(features)}')
+
 
     # Plot markers on the same graph
     plt.scatter(up_marker_indices + split_index, closing_prices.iloc[up_marker_indices + split_index],
@@ -347,8 +370,12 @@ def get_encoder(retrain, num_inputs, X_train, X_test):
         autoencoder = Model(input_layer, decoded)
         autoencoder.compile(optimizer='adam', loss='mse')
 
+        # Define the EarlyStopping callback
+        early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
+
         # Train the autoencoder
-        autoencoder.fit(X_train, X_train, epochs=ae_epochs, batch_size=ae_batch_size, validation_data=(X_test, X_test))
+        autoencoder.fit(X_train, X_train, epochs=ae_epochs, batch_size=ae_batch_size, validation_data=(X_test, X_test),
+                        callbacks=[early_stopping])
         autoencoder.save(f'models/{group_name}/{encoder_name}.keras')
         ae_model = autoencoder
 
@@ -364,7 +391,7 @@ def get_encoder(retrain, num_inputs, X_train, X_test):
 
     print('ae model summary: ')
     ae_model.summary()
-    encoder = Model(ae_model.input, ae_model.get_layer('max_pooling1d_1').output)
+    encoder = Model(ae_model.input, ae_model.get_layer('encoded_layer').output)
     # encoder = Model(input_layer, encoded)
 
     return encoder
@@ -497,10 +524,23 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
     return trade_model
 
 
+def refresh_live_data():
+    combineDataToCSV(symbol='SPY', interval='5min', outputsize=5000, time_period=14)
+    # filter out extended hours data
+    df = pd.read_csv('historical_data/current.csv')
+    # Convert the timestamp column to datetime
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    # Filter rows between 09:30:00 and 16:00:00
+    filtered_df = df[(df['datetime'].dt.time >= pd.to_datetime('09:00:00').time()) &
+                     (df['datetime'].dt.time <= pd.to_datetime('16:25:00').time())]
+    # Print the filtered DataFrame
+    filtered_df.to_csv(f'historical_data/current.csv', index=False)
+
+
 def run_pipeline(data):
     # ----create training/test data (X) and training/test labels (y)----
     unscaled_data, scaled_data = normalizeData(data)
-    X, y, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta, None)
+    X, y, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta)
 
     # Split the data sequentially
     split_index = int(len(X) * 0.8)
@@ -571,7 +611,7 @@ def run_pipeline(data):
         # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
         test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_look_back)
     # display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
-    # createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
+    createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
     plot_signals_chart(trade_model, unscaled_data, test_features, split_index)
 
     # Testing model w/ labels for half the desired delta
@@ -582,7 +622,7 @@ def run_pipeline(data):
         test_features2, trade_labels_test2 = create3dDataset(test_features2, trade_labels_test2, t_look_back)
     td_name = trade_model_name + '_halvedLabels'
     # display_test_results1(trade_model, test_features, trade_labels_test, td_name)
-    # createConfusionMatrices(trade_model, td_name, group_name, test_features2, trade_labels_test2, threshold)
+    createConfusionMatrices(trade_model, td_name, group_name, test_features2, trade_labels_test2, threshold)
 
 
 def run_pipeline2(data, future_data):  # all retrain must be False
@@ -636,98 +676,230 @@ def run_pipeline2(data, future_data):  # all retrain must be False
     return trade_model.predict(train_features), trade_labels_train[-1]
 
 
+def run_live_pipeline(data):  # all retrain must be False
+    # ----create training/test data (X) and training/test labels (y)----
+    unscaled_data, scaled_data = normalizeData(data)
+    X = create_X_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta)
+    y = None
+    z = None
+
+    # Split the data sequentially
+    # split_index = int(len(X) * 0.8)
+    # X_train, X_test = X[:split_index], X[split_index:]
+    # y_train, y_test = y[:split_index], y[split_index:]
+    num_inputs = X.shape[2]
+    encoder = get_encoder(retrain_encoder, num_inputs, X, X)
+    # Encode the train and test data
+    encoded_train = encoder.predict(X)
+
+    # Flatten encoded features
+    encoded_train_flat = encoded_train.reshape(encoded_train.shape[0], -1)
+
+    # Combine encoded features with raw data
+    train_combined = np.hstack((encoded_train_flat, X[:, -1, :]))
+
+    # Get delta model
+    delta_model = get_delta_model(retrain_delta_model, train_combined, y, train_combined, y)
+    if d_num_of_lstm > 0:
+        train_combined, y_train = create3dDataset(train_combined, y, d_look_back)
+    # display_test_results2(delta_model, test_combined, y_test)
+
+    # Get delta model predictions
+    predicted_deltas_train = delta_model.predict(train_combined)
+
+    # Combine (encoded features + X data) with predicted deltas for the trade model
+    if d_num_of_lstm > 0:
+        train_features = np.hstack(
+            (train_combined[:, -1, :], predicted_deltas_train))
+    else:
+        train_features = np.hstack(
+            (train_combined, predicted_deltas_train))  # changed from encoded_train_flat in tradeModel1
+        # changed from encoded_test_flat for tradeModel1b
+
+    # Split trading labels into train and test set
+    trade_labels_train = z
+
+    # Get trade model and test it
+    trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train,
+                                  train_features, trade_labels_train)
+    if t_num_of_lstm > 0:
+        train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
+
+    return trade_model.predict(train_features), predicted_deltas_train, unscaled_data
+
+
+channel_id = 1112148552039288892
+token = 'MTExMjE0NzAxNjg2OTQ5NDg4Ng.Gh6UbG.54FbJ_JwPTjg7dfubsEF5GZ8xxwNN3TJe_z5Dc'
+
+"""refresh live data -> run pipeline -> print"""
+while True:
+    refresh_live_data()
+    data = csvToList('historical_data/current.csv')
+    predictions, deltas, unscaled_data = run_live_pipeline(data)
+    up_predictions = predictions[:, 0]
+    down_predictions = predictions[:, 1]
+
+    scaler = MinMaxScaler()
+    up_predictions = up_predictions.reshape(-1, 1)
+    down_predictions = down_predictions.reshape(-1, 1)
+    scaled_up_predictions = scaler.fit_transform(up_predictions)
+    scaled_down_predictions = scaler.fit_transform(down_predictions)
+
+    # Round to 0 or 1 based on the threshold
+    # binary_predictions = (predictions > threshold).astype(int)
+    binary_up_predictions = np.where(scaled_up_predictions >= up_threshold, 1, 0)
+    binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
+    print(f'preicted deltas: {deltas}')
+    print(f'{predictions[-1]}')
+    print(f'up prediction: {binary_up_predictions[-1]}')
+    print(f'down prediction: {binary_down_predictions[-1]}')
+    print(f'current price: {unscaled_data.iloc[-1, 0]}')
+    time.sleep(285)
+
 # retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
-raw_list = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
-split_index = int(len(raw_list) * 0.8)
-raw_list = raw_list[split_index:]
+# raw_list = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
+# run_pipeline(raw_list)
+# print('test 1 complete ---------------------')
+# split_index = int(len(raw_list) * 0.8)
+# raw_list = raw_list[split_index:]
 # raw_list2 = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
-# run_pipeline(data)
+
 
 # set test_data (last 5000 samples), set trade_history = [], feed into model.predict
 # if not holding_position and model.predict(-1)[0] == 1 then long, if model.predict(-1)[1] == 1 then short
 # position_start_time = i and position_start_price = closing_price[i]
 # if pst > 12 then close position; if closing_price[i] - position_start_price >== desired_delta then close position
 # if closing position then append to trade_history
-data_window_size = 5000
-starting_balance = 1000
-nopen_up_positions = 0
-nclosed_up_positions = 0
-nopen_down_positions = 0
-nclosed_down_positions = 0
-trade_history = []
-winning_up_trades = 0
-losing_up_trades = 0
-winning_down_trades = 0
-losing_down_trades = 0
-max_nopen = 2
-all_predictions = []
-all_labels = []
+# data_window_size = 5000
+# starting_balance = 1000
+#
+# winning_up_trades = 0
+# losing_up_trades = 0
+# winning_down_trades = 0
+# losing_down_trades = 0
+# all_predictions = []
+# all_labels = []
+#
+# c1_entered = False
+# c2_entered = False
+# c1_entry_price = 0
+# c2_entry_price = 0
+# c1_entry_time = 0
+# c2_entry_time = 0
+# c1_entry_datetime = None
+# c2_entry_datetime = None
+# p1_entered = False
+# p2_entered = False
+# p1_entry_price = 0
+# p2_entry_price = 0
+# p1_entry_time = 0
+# p2_entry_time = 0
+# p1_entry_datetime = None
+# p2_entry_datetime = None
 
-for i in range(len(raw_list) - data_window_size - trade_window):
-    print(f'list iteration {i}')
-    # splice data to only have 'data_window_size' samples
-    raw_data1 = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[split_index:]  # [:-trade_window]
-    raw_data2 = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[split_index:]  # [:-trade_window]
-    data_window = raw_data1[i:i + data_window_size]
-    future_data_window = raw_data2[i:i + data_window_size + trade_window]
+# for i in range(len(raw_list) - data_window_size - trade_window):
+#     print(f'list iteration {i}')
+#     # splice data to only have 'data_window_size' samples
+#     raw_data1 = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[split_index:]  # [:-trade_window]
+#     raw_data2 = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[split_index:]  # [:-trade_window]
+#     data_window = raw_data1[i:i + data_window_size]
+#     future_data_window = raw_data2[i:i + data_window_size + trade_window]
+#
+#     # get data, labels, and predictions for current timestep (i+data_window_size)
+#     current_predictions, trade_labels_test = run_pipeline2(data_window, future_data_window)
+#
+#     up_predictions = current_predictions[:, 0]
+#     down_predictions = current_predictions[:, 1]
+#
+#     # loss, prec = model.evaluate(t_data, t_labels, verbose=0)
+#
+#     # debugging - realized threshold is too high so predictions aren't getting rounded to 1
+#     # for p, t in zip(predictions, t_labels):
+#     #     print(f'predicted: {p}')
+#     #     print(f'actual___: {t}')
+#
+#     scaler = MinMaxScaler()  # made run_pipeline2 return full predictions so it can be scaled here easier
+#     up_predictions = up_predictions.reshape(-1, 1)
+#     down_predictions = down_predictions.reshape(-1, 1)
+#
+#     scaled_up_predictions = scaler.fit_transform(up_predictions)
+#     # scaled_up_predictions = np.array(scaled_up_predictions)
+#
+#     scaled_down_predictions = scaler.fit_transform(down_predictions)
+#
+#     # Round to 0 or 1 based on the threshold
+#     binary_up_predictions = np.where(up_predictions >= up_threshold, 1, 0)
+#     binary_down_predictions = np.where(down_predictions >= down_threshold, 1, 0)
+#
+#     current_predictions = [binary_up_predictions[-1, 0], binary_down_predictions[-1, 0]]
+#     print(f'predictions: {current_predictions}')
+#     # print(f'binup_pred: {binary_up_predictions}')
+#     # print(f'bindown_pred: {binary_down_predictions}')
+#     print(f'trade_label: {trade_labels_test}')
+#
+#     # Store predictions and labels for evaluation
+#     all_predictions.append(current_predictions)
+#     all_labels.append(trade_labels_test)
 
-    # get data, labels, and predictions for current timestep (i+data_window_size)
-    current_predictions, trade_labels_test = run_pipeline2(data_window, future_data_window)
+    # if current_predictions[0] == 1 and trade_labels_test[0] == 1:
+    #     winning_up_trades += 1
+    #     starting_balance = int(starting_balance * 1.002)
+    # elif current_predictions[0] == 1 and trade_labels_test[0] == 0:
+    #     losing_up_trades += 1
+    #     starting_balance = int(starting_balance * .998)
+    # if current_predictions[1] == 1 and trade_labels_test[1] == 1:
+    #     winning_down_trades += 1
+    #     starting_balance = int(starting_balance * 1.002)
+    # elif current_predictions[1] == 1 and trade_labels_test[1] == 0:
+    #     losing_down_trades += 1
+    #     starting_balance = int(starting_balance * .998)
 
-    up_predictions = current_predictions[:, 0]
-    down_predictions = current_predictions[:, 1]
+    # current_data = data_window[i+data_window_size-1]  # do I need the '-1'?
+    # # define call entry
+    # if current_predictions[0] == 1 and not (c1_entered and c2_entered):
+    #     if not c1_entered:
+    #         # enter c1
+    #         c1_entered = True
+    #         c1_entry_time = 0
+    #         c1_entry_price = current_data[1]
+    #         c1_entry_datetime = current_data[0]
+    #     elif not c2_entered:
+    #         # enter c2
+    #         c2_entered = True
+    #         c2_entry_time = 0
+    #         c2_entry_price = current_data[1]
+    #         c1_entry_datetime = current_data[0]
+    #     else:
+    #         print('OOPS -> call entry model broken')
+    # # define put entry
+    # if current_predictions[1] == 1 and not (p1_entered and p2_entered):
+    #     if not p1_entered:
+    #         # enter p1
+    #         p1_entered = True
+    #         p1_entry_time = 0
+    #         p1_entry_price = current_data[1]
+    #         p1_entry_datetime = current_data[0]
+    #     elif not p2_entered:
+    #         # enter p2
+    #         p2_entered = True
+    #         p2_entry_time = 0
+    #         p2_entry_price = current_data[1]
+    #         p2_entry_datetime = current_data[0]
+    #     else:
+    #         print('OOPS -> put entry model broken')
+    # define exit (entrytime = 12, desired_delta reached, stoploss?)
 
-    # loss, prec = model.evaluate(t_data, t_labels, verbose=0)
 
-    # debugging - realized threshold is too high so predictions aren't getting rounded to 1
-    # for p, t in zip(predictions, t_labels):
-    #     print(f'predicted: {p}')
-    #     print(f'actual___: {t}')
+    # increase entry time for all entered positions
 
-    scaler = MinMaxScaler()  # made run_pipeline2 return full predictions so it can be scaled here easier
-    up_predictions = up_predictions.reshape(-1, 1)
-    down_predictions = down_predictions.reshape(-1, 1)
-
-    scaled_up_predictions = scaler.fit_transform(up_predictions)
-    # scaled_up_predictions = np.array(scaled_up_predictions)
-
-    scaled_down_predictions = scaler.fit_transform(down_predictions)
-
-    # Round to 0 or 1 based on the threshold
-    binary_up_predictions = np.where(up_predictions >= up_threshold, 1, 0)
-    binary_down_predictions = np.where(down_predictions >= down_threshold, 1, 0)
-
-    current_predictions = [binary_up_predictions[-1, 0], binary_down_predictions[-1, 0]]
-    print(f'predictions: {current_predictions}')
-    # print(f'binup_pred: {binary_up_predictions}')
-    # print(f'bindown_pred: {binary_down_predictions}')
-    print(f'trade_label: {trade_labels_test}')
-
-    # Store predictions and labels for evaluation
-    all_predictions.append(current_predictions)
-    all_labels.append(trade_labels_test)
-
-    if current_predictions[0] == 1 and trade_labels_test[0] == 1:
-        winning_up_trades += 1
-        starting_balance = int(starting_balance * 1.002)
-    elif current_predictions[0] == 1 and trade_labels_test[0] == 0:
-        losing_up_trades += 1
-        starting_balance = int(starting_balance * .998)
-    if current_predictions[1] == 1 and trade_labels_test[1] == 1:
-        winning_down_trades += 1
-        starting_balance = int(starting_balance * 1.002)
-    elif current_predictions[1] == 1 and trade_labels_test[1] == 0:
-        losing_down_trades += 1
-        starting_balance = int(starting_balance * .998)
-
-    accuracy = accuracy_score(all_labels, all_predictions)
-    print(f'Model Accuracy: {accuracy:.2f}')
-    print(f'up winners: {winning_up_trades}')
-    print(f'up losers: {losing_up_trades}')
-    print(f'down winners: {winning_down_trades}')
-    print(f'down losers: {losing_down_trades}')
-    print(f'starting balance: 1000')
-    print(f'ending balance: {starting_balance}')
+    # accuracy = accuracy_score(all_labels, all_predictions)
+    # print(f'Model Accuracy: {accuracy:.2f}')
+    # print(f'up winners: {winning_up_trades}')
+    # print(f'up losers: {losing_up_trades}')
+    # print(f'down winners: {winning_down_trades}')
+    # print(f'down losers: {losing_down_trades}')
+    # print(f'starting balance: 1000')
+    # print(f'ending balance: {starting_balance}')
 
     # saves closing price, the up/down trading labels, the current prediction
     # trade_history.append([unscaled_data.iloc[-1][0], trade_labels_test[-1], current_predictions[-1]])
@@ -735,14 +907,16 @@ for i in range(len(raw_list) - data_window_size - trade_window):
 # After the loop, you can evaluate the model's performance
 # For example, using accuracy, precision, recall, F1-score, etc.
 
-accuracy = accuracy_score(all_labels, all_predictions)
-print(f'Model Accuracy: {accuracy:.2f}')
-print(f'up winners: {winning_up_trades}')
-print(f'up losers: {losing_up_trades}')
-print(f'down winners: {winning_down_trades}')
-print(f'down losers: {losing_down_trades}')
-print(f'starting balance: 1000')
-print(f'ending balance: {starting_balance}')
+# accuracy = accuracy_score(all_labels, all_predictions)
+# print(f'Model Accuracy: {accuracy:.2f}')
+# print(f'up winners: {winning_up_trades}')
+# print(f'up losers: {losing_up_trades}')
+# print(f'down winners: {winning_down_trades}')
+# print(f'down losers: {losing_down_trades}')
+# print(f'starting balance: 1000')
+# print(f'ending balance: {starting_balance}')
+# listToCSV(all_labels, f'models/{group_name}/testLabels.csv')
+# listToCSV(all_predictions, f'models/{group_name}/testPredictions.csv')
 """
 inputs for delta model:
 - relative time of day (drop delta time of day)
@@ -772,29 +946,11 @@ or is it being used to predict delta price for (i+window_size)+trade_window ?
 
 """
 to use live:
-    get latest data (X)
+    get latest data (X) ---> [api call on indicators, combine, filter, normalize, then send to pipeline]
     CNN autoencoder predict,
     delta_model predict,
     trade_model predict (-1)
 
-** recreate live data backtesting by providing limited data at each point (is this already accomplished?)
-- change CM to save w/ threshold in name, retest model2 and model2b
-- create and test tradeModel1b_downOnly
+
 """
 
-# # Predict trade opportunities using the trade model
-# predictions = (trade_model.predict(test_features) > 0.5).astype(int).flatten()
-#
-# # Plot the close price along with trade markers
-# unscaled_data_test = unscaled_data[split_index:]
-# close_prices = unscaled_data_test.iloc[:, 0]  # Assuming the close price is the first feature in the last timestep
-#
-# plt.figure(figsize=(15, 7))
-# plt.plot(close_prices, label='Close Price', color='blue')
-# plt.scatter(np.arange(len(close_prices))[predictions == 1], close_prices[predictions == 1],
-#             color='red', marker='o', label='Trade Signal')
-# plt.xlabel('Time')
-# plt.ylabel('Price')
-# plt.title('Close Price with Trade Signals')
-# plt.legend()
-# plt.show()

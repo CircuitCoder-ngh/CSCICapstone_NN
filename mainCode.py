@@ -36,9 +36,9 @@ def combineDataToCSV(symbol, interval, outputsize, time_period, optional=None):
         combined_sample = {
             'datetime': sample_rsi['datetime'],  # other fn's depend on this staying loc[0]
             'close': sample_price['close'],  # other fn's depend on this staying loc[1]
+            'open': sample_price['open'],
             'high': sample_price['high'],
             'low': sample_price['low'],
-            'open': sample_price['open'],
             'vol': sample_price['volume'],
             'obv': sample_obv['obv'],
             'rsi': sample_rsi['rsi'],
@@ -54,7 +54,8 @@ def combineDataToCSV(symbol, interval, outputsize, time_period, optional=None):
     df = pd.DataFrame(combined_list)
 
     # Specify the CSV file path (adjust as needed)
-    csv_file_path = f'historical_data/{symbol}{interval}{time_period}{optional}.csv'
+    # csv_file_path = f'historical_data/{symbol}{interval}{time_period}{optional}.csv'
+    csv_file_path = f'historical_data/current.csv'
 
     # Write the DataFrame to the CSV file
     df.to_csv(csv_file_path, index=False)
@@ -220,7 +221,8 @@ def create3dDataset(dataset, data_labels, look_back):  # look_back must be 1 w/ 
     for i in range(len(dataset) - look_back):  # removed -1 after tradeModel7
         a = dataset[i:(i + look_back), :]  # [...:i, 0] would only add the val from col[0]
         dataX.append(a)
-        dataY.append(data_labels[i + look_back])
+        if data_labels is not None:
+            dataY.append(data_labels[i + look_back])
 
     # x = []
     # for i in range(look_back, len(dataset)):
