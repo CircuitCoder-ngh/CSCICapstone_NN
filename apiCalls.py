@@ -40,7 +40,9 @@ def getTimeSeries_AV(symbol, interval, month):
     # interval - the following values are supported: 1min, 5min, 15min, 30min, 60min, daily, weekly, monthly
 
     url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY' \
-          f'&month={month}&symbol={symbol}&interval={interval}&apikey={apikey}&outputsize=full'
+          f'&symbol={symbol}&interval={interval}&apikey={apikey}&outputsize=full'
+    if month is not None:
+        url += f'&month={month}'
 
     response = requests.get(url)
 
@@ -68,8 +70,10 @@ def getATR(interval, symbol, time_period, outputsize):
 def getATR_AV(symbol, interval, time_period, month):
 
     url = f'https://www.alphavantage.co/query?function=ATR' \
-          f'&month={month}&symbol={symbol}&interval={interval}&time_period={time_period}' \
+          f'&symbol={symbol}&interval={interval}&time_period={time_period}' \
           f'&apikey={apikey}&outputsize=full'
+    if month is not None:
+        url += f'&month={month}'
 
     response = requests.get(url)
 
@@ -97,7 +101,9 @@ def getOBV(symbol, interval, outputsize):
 def getOBV_AV(symbol, interval, month):
 
     url = f'https://www.alphavantage.co/query?function=OBV' \
-          f'&symbol={symbol}&interval={interval}&month={month}&apikey={apikey}&outputsize=full'
+          f'&symbol={symbol}&interval={interval}&apikey={apikey}&outputsize=full'
+    if month is not None:
+        url += f'&month={month}'
 
     response = requests.get(url)
 
@@ -126,8 +132,10 @@ def getRSI(symbol, interval, time_period, outputsize):
 def getRSI_AV(symbol, interval, time_period, month, series_type='close'):
 
     url = f'https://www.alphavantage.co/query?function=RSI' \
-          f'&month={month}&symbol={symbol}&interval={interval}&time_period={time_period}' \
+          f'&symbol={symbol}&interval={interval}&time_period={time_period}' \
           f'&series_type={series_type}&apikey={apikey}&outputsize=full'
+    if month is not None:
+        url += f'&month={month}'
 
     response = requests.get(url)
 
@@ -155,9 +163,11 @@ def getMACD(symbol, interval, signal_period, outputsize, fast_period, slow_perio
 def getMACD_AV(symbol, interval, signal_period, month, fast_period, slow_period, series_type='open'):
 
     url = f'https://www.alphavantage.co/query?function=MACDEXT' \
-          f'&symbol={symbol}&interval={interval}&signalperiod={signal_period}&month={month}' \
+          f'&symbol={symbol}&interval={interval}&signalperiod={signal_period}' \
           f'&fastperiod={fast_period}&slowperiod={slow_period}&series_type={series_type}&apikey={apikey}' \
           f'&fastmatype=1&slowmatype=1&signalmatype=1&outputsize=full'
+    if month is not None:
+        url += f'&month={month}'
 
     response = requests.get(url)
 

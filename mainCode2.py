@@ -1,17 +1,19 @@
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
-from keras.models import Model, Sequential
-from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Flatten, Dropout, LSTM
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
-from mainCode import csvToArray, createConfusionMatrix, listToCSV, csvToList, create3dDataset, combineDataToCSV
-from tensorflow import keras
-from keras.callbacks import EarlyStopping
-import datetime, time, schedule
-import discord
+import datetime
+import time
 import requests
+
+import discord
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from keras.callbacks import EarlyStopping
+from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Dropout, LSTM
+from keras.models import Model, Sequential
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow import keras
+
+from mainCode import createConfusionMatrix, csvToList, create3dDataset, combineDataToCSV, combineDataToCSV_AV
 
 """Creates a CNN autoencoder (32/3, 2, 64/3, 2) to learn patterns in the data,
 then feeds predicted features output along w/ the data into a sequential model of 
@@ -525,7 +527,7 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
 
 
 def refresh_live_data():
-    combineDataToCSV(symbol='SPY', interval='5min', outputsize=5000, time_period=14)
+    combineDataToCSV_AV(symbol='SPY', interval='5min', time_period=14, month=None)
     # filter out extended hours data
     df = pd.read_csv('historical_data/current.csv')
     # Convert the timestamp column to datetime
@@ -728,33 +730,63 @@ def run_live_pipeline(data):  # all retrain must be False
     return trade_model.predict(train_features), predicted_deltas_train, unscaled_data
 
 
+def message_post(token, channel_id, message):
+    # url = f"https://discord.com/api/v9/channels/{channel_id}/messages"
+    url = 'https://discord.com/api/webhooks/1253402890526134295/kR3NR9FPNrPPq3Ws62Y1DVouLomTU5XCCFw82vdkubm5DG3g87LXoVYuK-8C80B-hlZq'
+
+    headers = {
+        "Authorization": f"{token}",
+    }
+
+    data = {
+        "content": message
+    }
+
+    response = requests.post(url, headers=headers, json=data)
+
+    if response.status_code < 400:
+        print("Message sent successfully.")
+    else:
+        print(f'{response.status_code}: Failed to send the message.')
+
+
 channel_id = 1112148552039288892
 token = 'MTExMjE0NzAxNjg2OTQ5NDg4Ng.Gh6UbG.54FbJ_JwPTjg7dfubsEF5GZ8xxwNN3TJe_z5Dc'
 
+
 """refresh live data -> run pipeline -> print"""
 while True:
-    refresh_live_data()
-    data = csvToList('historical_data/current.csv')
-    predictions, deltas, unscaled_data = run_live_pipeline(data)
-    up_predictions = predictions[:, 0]
-    down_predictions = predictions[:, 1]
+    current_minute = time.localtime().tm_min
+    if current_minute % 1 == 0:
+        refresh_live_data()
+        data = csvToList('historical_data/current.csv')
+        predictions, deltas, unscaled_data = run_live_pipeline(data)
+        up_predictions = predictions[:, 0]
+        down_predictions = predictions[:, 1]
 
-    scaler = MinMaxScaler()
-    up_predictions = up_predictions.reshape(-1, 1)
-    down_predictions = down_predictions.reshape(-1, 1)
-    scaled_up_predictions = scaler.fit_transform(up_predictions)
-    scaled_down_predictions = scaler.fit_transform(down_predictions)
+        scaler = MinMaxScaler()
+        up_predictions = up_predictions.reshape(-1, 1)
+        down_predictions = down_predictions.reshape(-1, 1)
+        scaled_up_predictions = scaler.fit_transform(up_predictions)
+        scaled_down_predictions = scaler.fit_transform(down_predictions)
 
-    # Round to 0 or 1 based on the threshold
-    # binary_predictions = (predictions > threshold).astype(int)
-    binary_up_predictions = np.where(scaled_up_predictions >= up_threshold, 1, 0)
-    binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
-    print(f'preicted deltas: {deltas}')
-    print(f'{predictions[-1]}')
-    print(f'up prediction: {binary_up_predictions[-1]}')
-    print(f'down prediction: {binary_down_predictions[-1]}')
-    print(f'current price: {unscaled_data.iloc[-1, 0]}')
-    time.sleep(285)
+        # Round to 0 or 1 based on the threshold
+        # binary_predictions = (predictions > threshold).astype(int)
+        binary_up_predictions = np.where(scaled_up_predictions >= up_threshold, 1, 0)
+        binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
+
+        message = f'--------------------------\n' \
+                  f'predicted deltas: {deltas}\n' \
+                  f'unscaled predictions: {predictions[-1]}\n' \
+                  f'up pred: {binary_up_predictions[-1]}\n' \
+                  f'down pred: {binary_down_predictions[-1]}\n' \
+                  f'current price: {unscaled_data.iloc[-1, 0]}\n' \
+                  f'--------------------------\n'
+        message_post(token, channel_id, message)
+        print(message)
+
+        time.sleep(60)
+
 
 # retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
 # raw_list = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
