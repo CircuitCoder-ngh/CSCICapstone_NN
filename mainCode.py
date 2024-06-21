@@ -94,7 +94,7 @@ def combineDataToCSV_AV(symbol, interval, month, time_period, optional=None):
             'macd': data_macd['Technical Analysis: MACDEXT'][sample_macd]['MACD']
         }
         combined_list.append(combined_sample)
-        print(f'{sample_price}, {sample_obv}, {sample_rsi}, {sample_atr}, {sample_macd}')
+        # print(f'{sample_price}, {sample_obv}, {sample_rsi}, {sample_atr}, {sample_macd}')
 
     # puts list in chronological order (loc[0] is oldest, loc[i] is most recent
     combined_list = reverse_list(combined_list)
@@ -103,7 +103,10 @@ def combineDataToCSV_AV(symbol, interval, month, time_period, optional=None):
     df = pd.DataFrame(combined_list)
 
     # Specify the CSV file path (adjust as needed) # removed {optional} from end of filepath
-    csv_file_path = f'historical_data/{symbol}{interval}_raw/{symbol}{interval}{time_period}_{month}.csv'
+    if optional is not None:
+        csv_file_path = f'historical_data/current.csv'
+    else:
+        csv_file_path = f'historical_data/{symbol}{interval}_raw/{symbol}{interval}{time_period}_{month}.csv'
 
     # Write the DataFrame to the CSV file
     df.to_csv(csv_file_path, index=False)

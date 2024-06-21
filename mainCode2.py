@@ -527,7 +527,7 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
 
 
 def refresh_live_data():
-    combineDataToCSV_AV(symbol='SPY', interval='5min', time_period=14, month=None)
+    combineDataToCSV_AV(symbol='SPY', interval='5min', time_period=14, month=None, optional=True)
     # filter out extended hours data
     df = pd.read_csv('historical_data/current.csv')
     # Convert the timestamp column to datetime

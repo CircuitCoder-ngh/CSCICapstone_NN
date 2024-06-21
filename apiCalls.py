@@ -43,6 +43,8 @@ def getTimeSeries_AV(symbol, interval, month):
           f'&symbol={symbol}&interval={interval}&apikey={apikey}&outputsize=full'
     if month is not None:
         url += f'&month={month}'
+    else:
+        url += '&entitlement=realtime'
 
     response = requests.get(url)
 
@@ -74,6 +76,8 @@ def getATR_AV(symbol, interval, time_period, month):
           f'&apikey={apikey}&outputsize=full'
     if month is not None:
         url += f'&month={month}'
+    else:
+        url += '&entitlement=realtime'
 
     response = requests.get(url)
 
@@ -104,6 +108,8 @@ def getOBV_AV(symbol, interval, month):
           f'&symbol={symbol}&interval={interval}&apikey={apikey}&outputsize=full'
     if month is not None:
         url += f'&month={month}'
+    else:
+        url += '&entitlement=realtime'
 
     response = requests.get(url)
 
@@ -136,6 +142,8 @@ def getRSI_AV(symbol, interval, time_period, month, series_type='close'):
           f'&series_type={series_type}&apikey={apikey}&outputsize=full'
     if month is not None:
         url += f'&month={month}'
+    else:
+        url += '&entitlement=realtime'
 
     response = requests.get(url)
 
@@ -168,6 +176,8 @@ def getMACD_AV(symbol, interval, signal_period, month, fast_period, slow_period,
           f'&fastmatype=1&slowmatype=1&signalmatype=1&outputsize=full'
     if month is not None:
         url += f'&month={month}'
+    else:
+        url += '&entitlement=realtime'
 
     response = requests.get(url)
 
