@@ -508,29 +508,29 @@ def plotGroupResults(filename):
 
 
 # -------------- creation of groupC -------------- #
-data = csvToArray('historical_data/SPY5min_20to23_Normalized.csv')[:-12]
-data = np.delete(data, 4, axis=1)  # removes 'open'
-data = np.delete(data, 3, axis=1)  # removes 'low'
-data = np.delete(data, 2, axis=1)  # removes 'high'
-data_labels = csvToArray('historical_data/SPY5min_20to23_TrainingLabels0.2.csv')[:-12]
-test_size = int(len(data) * 0.8)
-test_data = data[test_size:]
-test_labels = data_labels[test_size:]
-training_data = data[:test_size]
-training_labels = data_labels[:test_size]
-
-# thresholds = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
-layers_LSTM = [1, 2, 3]  # [0, 1, 2, 3]
-units_LSTM = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
-lookback_LSTM = [1, 2, 3]
-dropout = [0, 0.1, 0.2, 0.4, 0.8]
-# kernel_constraints = [None, 5, 2.5, 1]
-layers_Dense = [2, 3, 4]  # [1, 2, 3, 4]
-units_Dense = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
-# num_epoch = [50, 100, 150, 200]
-# size_batch = [6, 12, 24]
-i = 0  # 25
-j = 0
+# data = csvToArray('historical_data/SPY5min_20to23_Normalized.csv')[:-12]
+# data = np.delete(data, 4, axis=1)  # removes 'open'
+# data = np.delete(data, 3, axis=1)  # removes 'low'
+# data = np.delete(data, 2, axis=1)  # removes 'high'
+# data_labels = csvToArray('historical_data/SPY5min_20to23_TrainingLabels0.2.csv')[:-12]
+# test_size = int(len(data) * 0.8)
+# test_data = data[test_size:]
+# test_labels = data_labels[test_size:]
+# training_data = data[:test_size]
+# training_labels = data_labels[:test_size]
+#
+# # thresholds = [0.5, 0.6, 0.7, 0.8, 0.9, 1]
+# layers_LSTM = [1, 2, 3]  # [0, 1, 2, 3]
+# units_LSTM = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
+# lookback_LSTM = [1, 2, 3]
+# dropout = [0, 0.1, 0.2, 0.4, 0.8]
+# # kernel_constraints = [None, 5, 2.5, 1]
+# layers_Dense = [2, 3, 4]  # [1, 2, 3, 4]
+# units_Dense = [8, 16, 32, 64]  # [4, 8, 16, 32, 64]
+# # num_epoch = [50, 100, 150, 200]
+# # size_batch = [6, 12, 24]
+# i = 0  # 25
+# j = 0
 # createNewModel('groupC', training_data, training_labels, test_data, test_labels,
 #                                            0.7, 3, 8, 2, 0, 5, 4, 64, 150, 6)
 # createNewModel('groupC', training_data, training_labels, test_data, test_labels,
@@ -573,27 +573,27 @@ j = 0
 # months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
 # for yr in years:
 #     for m in months:
-#         combineDataToCSV_AV(symbol='SPY', interval='5min', month=f'{yr}-{m}', time_period=14)
-
-# combine csv files for dif months into single csv
+#         combineDataToCSV_AV(symbol='SPY', interval='1min', month=f'{yr}-{m}', time_period=14)
+#
+# # combine csv files for dif months into single csv
 # df_csv_append = pd.DataFrame()
-# path = f"historical_data/SPY5min_raw"
+# path = f"historical_data/SPY1min_raw"
 # dirs = os.listdir(path)
 # for file in dirs:
 #     if file.endswith(".csv"):
-#         df = pd.read_csv(f'historical_data/SPY5min_raw/{file}')
+#         df = pd.read_csv(f'historical_data/SPY1min_raw/{file}')
 #         df_csv_append = pd.concat([df_csv_append, df], ignore_index=True)
-# df_csv_append.to_csv(f'historical_data/SPY5min_rawCombined.csv', index=False)
-
-# filter out extended hours data
-# df = pd.read_csv('historical_data/SPY5min_rawCombined.csv')
+# df_csv_append.to_csv(f'historical_data/SPY1min_rawCombined.csv', index=False)
+#
+# # filter out extended hours data
+# df = pd.read_csv('historical_data/SPY1min_rawCombined.csv')
 # # Convert the timestamp column to datetime
 # df['datetime'] = pd.to_datetime(df['datetime'])
 # # Filter rows between 09:30:00 and 16:00:00
 # filtered_df = df[(df['datetime'].dt.time >= pd.to_datetime('09:00:00').time()) &
 #                  (df['datetime'].dt.time <= pd.to_datetime('16:25:00').time())]
 # # Print the filtered DataFrame
-# filtered_df.to_csv(f'historical_data/SPY5min_rawCombinedFiltered.csv', index=False)
+# filtered_df.to_csv(f'historical_data/SPY1min_rawCombinedFiltered.csv', index=False)
 
 # create training labels (save csv) -> normalize data (save csv) -> train groupB models w/ this
 # createTrainingLabelCSV('historical_data/SPY5min_rawCombinedFiltered.csv', 0.2)
