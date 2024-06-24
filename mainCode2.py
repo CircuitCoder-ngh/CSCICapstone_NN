@@ -23,11 +23,11 @@ changes that will occur in the upcoming trade window, then feeds both of these
  dense layers that predicts whether or not the desired upward or downward price
  change will occur in the upcoming trade window"""
 
-encoder_name = 'autoencoder4'  # 1=window20, 2=window40, 3=window80+batchsize12, 4=1min+w80
-delta_model_name = 'deltaModel6'  # 2=lb3, 3=lb12+u340, 4=tradewindow6+ae2, 5=ae3, 6=ae4+tw12
-trade_model_name = 'tradeModel11'
+encoder_name = 'autoencoder5'  # 1=window20, 2=window40, 3=window80+batchsize12, 4=1min+w80, 5=1min+w40
+delta_model_name = 'deltaModel7'  # 2=lb3, 3=lb12+u340, 4=tradewindow6+ae2, 5=ae3, 6=ae4+tw12, 7=ae5
+trade_model_name = 'tradeModel12'
 # trade models: 3=lb3,4=lb12,5a=lb12+RSTRSF,5=RSTdoRSF+lessDenselayers, 6=moreDenseunits, 7=deltaModel3, 8=tw6+ae2+dm4,
-# 9=ae3+dm5, 10=ae4+dm6+tw12+dd.5, 11=ae4+dm6+dd.3
+# 9=ae3+dm5, 10=ae4+dm6+tw12+dd.5, 11=ae4+dm6+dd.3, 12=ae5+dm7+dd.3
 one_output = False  # used to indicate use of LSTM
 group_name = 'groupCNNa'
 d_lstm_units = 340
@@ -35,10 +35,10 @@ t_lstm_units = 340
 d_look_back = 12  # must match deltaModel's lookback
 t_look_back = 12  # must match tradeModel's lookback
 threshold = 0.3  # default 0.7
-up_threshold = 0.7
-down_threshold = 0.7
+up_threshold = 0.9
+down_threshold = 0.9
 trade_window = 12  # 12  # distance to predict price delta and trade opportunity
-window_size = 80  # window size (for CNN lookback)
+window_size = 40  # window size (for CNN lookback)
 ae_epochs = 200  # for autoencoder
 ae_batch_size = 12  # 6
 d_epochs = 200  # for delta model
@@ -311,9 +311,9 @@ def plot_signals_chart(trade_model, unscaled_data, features, split_index):
 
     # Plot markers on the same graph
     plt.plot(closing_prices, label='Closing Price')
-    plt.scatter(up_marker_indices + split_index, closing_prices.iloc[up_marker_indices + split_index],
+    plt.scatter(up_marker_indices+dif, closing_prices.iloc[up_marker_indices],
                 color='green', label='Long', marker='o')
-    plt.scatter(down_marker_indices + split_index, closing_prices.iloc[down_marker_indices + split_index],
+    plt.scatter(down_marker_indices+dif, closing_prices.iloc[down_marker_indices],
                 color='red', label='Short', marker='o')
 
     # Add labels and title
@@ -520,8 +520,8 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
     return trade_model
 
 
-def refresh_live_data():
-    combineDataToCSV_AV(symbol='SPY', interval='5min', time_period=14, month=None, optional=True)
+def refresh_live_data(interval):
+    combineDataToCSV_AV(symbol='SPY', interval=interval, time_period=14, month=None, optional=True)
     # filter out extended hours data
     df = pd.read_csv('historical_data/current.csv')
     # Convert the timestamp column to datetime
@@ -749,45 +749,45 @@ token = 'MTExMjE0NzAxNjg2OTQ5NDg4Ng.Gh6UbG.54FbJ_JwPTjg7dfubsEF5GZ8xxwNN3TJe_z5D
 
 
 """refresh live data -> run pipeline -> print"""
-# while True:
-#     current_minute = time.localtime().tm_min
-#     if current_minute % 1 == 0:
-#         refresh_live_data()
-#         data = csvToList('historical_data/current.csv')
-#         predictions, deltas, unscaled_data = run_live_pipeline(data)
-#         up_predictions = predictions[:, 0]
-#         down_predictions = predictions[:, 1]
-#
-#         scaler = MinMaxScaler()
-#         up_predictions = up_predictions.reshape(-1, 1)
-#         down_predictions = down_predictions.reshape(-1, 1)
-#         scaled_up_predictions = scaler.fit_transform(up_predictions)
-#         scaled_down_predictions = scaler.fit_transform(down_predictions)
-#
-#         # Round to 0 or 1 based on the threshold
-#         # binary_predictions = (predictions > threshold).astype(int)
-#         binary_up_predictions = np.where(scaled_up_predictions >= up_threshold, 1, 0)
-#         binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
-#
-#         message = f'--------------------------\n' \
-#                   f'predicted deltas: {deltas}\n' \
-#                   f'unscaled predictions: {predictions[-1]}\n' \
-#                   f'up pred: {binary_up_predictions[-1]}\n' \
-#                   f'down pred: {binary_down_predictions[-1]}\n' \
-#                   f'current price: {unscaled_data.iloc[-1, 0]}\n' \
-#                   f'--------------------------\n'
-#         message_post(token, channel_id, message)
-#         print(message)
-#
-#         time.sleep(60)
+while True:
+    current_minute = time.localtime().tm_min
+    if current_minute % 1 == 0:
+        refresh_live_data('1min')
+        data = csvToList('historical_data/current.csv')
+        predictions, deltas, unscaled_data = run_live_pipeline(data)
+        up_predictions = predictions[:, 0]
+        down_predictions = predictions[:, 1]
+
+        scaler = MinMaxScaler()
+        up_predictions = up_predictions.reshape(-1, 1)
+        down_predictions = down_predictions.reshape(-1, 1)
+        scaled_up_predictions = scaler.fit_transform(up_predictions)
+        scaled_down_predictions = scaler.fit_transform(down_predictions)
+
+        # Round to 0 or 1 based on the threshold
+        # binary_predictions = (predictions > threshold).astype(int)
+        binary_up_predictions = np.where(scaled_up_predictions >= up_threshold, 1, 0)
+        binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
+
+        message = f'--------------------------\n' \
+                  f'predicted deltas: {deltas}\n' \
+                  f'unscaled predictions: {predictions[-1]}\n' \
+                  f'up pred: {binary_up_predictions[-1]}\n' \
+                  f'down pred: {binary_down_predictions[-1]}\n' \
+                  f'current price: {unscaled_data.iloc[-1, 0]}\n' \
+                  f'--------------------------\n'
+        message_post(token, channel_id, message)
+        print(message)
+
+        time.sleep(60)
 
 
 # retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
-raw_list = csvToList('historical_data/SPY1min_rawCombinedFiltered.csv')  # [:-trade_window]
-split = int(len(raw_list) / 3)
-raw_list = raw_list[2*split:]
-run_pipeline(raw_list)
-print('test 1 complete ---------------------')
+# raw_list = csvToList('historical_data/SPY1min_rawCombinedFiltered.csv')  # [:-trade_window]
+# split = int(len(raw_list) / 3)
+# raw_list = raw_list[2*split:]
+# run_pipeline(raw_list)
+# print('test 1 complete ---------------------')
 # split_index = int(len(raw_list) * 0.8)
 # raw_list = raw_list[split_index:]
 # raw_list2 = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
