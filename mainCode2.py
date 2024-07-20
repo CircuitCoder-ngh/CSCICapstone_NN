@@ -753,11 +753,12 @@ token = 'MTExMjE0NzAxNjg2OTQ5NDg4Ng.Gh6UbG.54FbJ_JwPTjg7dfubsEF5GZ8xxwNN3TJe_z5D
 
 
 """refresh live data -> run pipeline -> print"""
-live = False
+live = True
+last_minute = time.localtime().tm_min
 while live:
     current_minute = time.localtime().tm_min
 
-    if current_minute % 5 == 0:
+    if current_minute % 5 == 0 and current_minute != last_minute:
         encoder_name = 'autoencoder1'  # 1=window20, 2=window40, 3=window80+batchsize12, 4=1min+w80, 5=1min+w40
         delta_model_name = 'deltaModel3'  # 2=lb3, 3=lb12+u340, 4=tradewindow6+ae2, 5=ae3, 6=ae4+tw12, 7=ae5
         trade_model_name = 'tradeModel7'
@@ -766,6 +767,7 @@ while live:
         up_threshold = 0.9
         down_threshold = 0.9
         desired_delta = 1
+        window_size = 20
 
         refresh_live_data('5min')
         data = csvToList('historical_data/current.csv')
@@ -803,13 +805,14 @@ while live:
 
     #     time.sleep(60)
 
-    if current_minute % 1 == 0:
+    if current_minute % 1 == 0 and current_minute != last_minute:
         encoder_name = 'autoencoder5'  # 1=window20, 2=window40, 3=window80+batchsize12, 4=1min+w80, 5=1min+w40
         delta_model_name = 'deltaModel7'  # 2=lb3, 3=lb12+u340, 4=tradewindow6+ae2, 5=ae3, 6=ae4+tw12, 7=ae5
         trade_model_name = 'tradeModel12'
         up_threshold = 0.9
         down_threshold = 0.9
         desired_delta = 0.3
+        window_size = 40
 
         refresh_live_data('1min')
         data = csvToList('historical_data/current.csv')
@@ -845,14 +848,15 @@ while live:
         message_post(token, channel_id, message)
         print(message)
 
-        time.sleep(60)
+        last_minute = current_minute
+        time.sleep(20)
 
 
 # retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
-raw_list = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
+# raw_list = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')  # [:-trade_window]
 # split = int(len(raw_list) / 3)
 # raw_list = raw_list[2*split:]
-run_pipeline(raw_list)
+# run_pipeline(raw_list)
 # print('test 1 complete ---------------------')
 # split_index = int(len(raw_list) * 0.8)
 # raw_list = raw_list[split_index:]
