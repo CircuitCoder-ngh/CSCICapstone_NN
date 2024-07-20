@@ -152,3 +152,21 @@
 
 # model = model16(training_data, training_labels)
 # createConfusionMatrix(model, 'model16t095', test_data, test_labels, 0.95)
+
+# import datetime
+#
+#
+# def relative_time_of_day(datetime_str):
+#     # Parse the datetime string
+#     dt = datetime.datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+#
+#     # Calculate the number of seconds since the start of the day
+#     seconds_since_start_of_day = dt.hour * 3600 + dt.minute * 60 + dt.second
+#
+#     return seconds_since_start_of_day
+#
+#
+# # Example usage
+# datetime_str = "2024-05-22 10:00:00"
+# timestamp = relative_time_of_day(datetime_str)
+# print(timestamp)  # Output: 35700
