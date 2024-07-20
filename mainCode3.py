@@ -17,9 +17,9 @@ from helperFunctions import *
 3. adjust creation of training data ( ) to include FVG and distance from daily satyATR lines
 """
 
-encoder_name = 'autoencoder2b'  # 1=window20, 2=window40, 3=window80+batchsize12, 4=1min+w80, 5=1min+w40
-delta_model_name = 'deltaModel4b'  # 2=lb3, 3=lb12+u340, 4=tradewindow6+ae2, 5=ae3, 6=ae4+tw12, 7=ae5
-trade_model_name = 'tradeModel8b'
+encoder_name = 'autoencoder2bb'  # 1=window20, 2=window40, 3=window80+batchsize12, 4=1min+w80, 5=1min+w40
+delta_model_name = 'deltaModel4bb'  # 2=lb3, 3=lb12+u340, 4=tradewindow6+ae2, 5=ae3, 6=ae4+tw12, 7=ae5
+trade_model_name = 'tradeModel8bb'
 # trade models: 3=lb3,4=lb12,5a=lb12+RSTRSF,5=RSTdoRSF+lessDenselayers, 6=moreDenseunits, 7=dm3, 8=tw6+ae2+dm4,
 # 9=ae3+dm5, 10=ae4+dm6+tw12+dd.5, 11=ae4+dm6+dd.3, 12=ae5+dm7+dd.3, 13=ae1+dm3+
 one_output = False  # used to indicate use of LSTM
@@ -29,12 +29,12 @@ t_lstm_units = 340
 d_look_back = 12  # must match deltaModel's lookback
 t_look_back = 12  # must match tradeModel's lookback
 threshold = 0.3  # default 0.7
-up_threshold = 0.7
-down_threshold = 0.7
+up_threshold = 0.9
+down_threshold = 0.9
 trade_window = 6  # 12  # distance to predict price delta and trade opportunity
 window_size = 40  # window size (for CNN lookback)
 ae_epochs = 200  # for autoencoder
-ae_batch_size = 12  # 6
+ae_batch_size = 6  # 6
 d_epochs = 200  # for delta model
 d_batch_size = 12
 t_epochs = 200  # for trade model
@@ -43,9 +43,9 @@ desired_delta = 1  # 1 for training, 0.5 for testing
 patience = 6
 d_num_of_lstm = 1
 t_num_of_lstm = 1
-retrain_encoder = True
-retrain_delta_model = True
-retrain_trade_model = True
+retrain_encoder = False
+retrain_delta_model = False
+retrain_trade_model = False
 
 
 def relative_time_of_day(datetime_str):
@@ -396,10 +396,7 @@ def get_encoder(retrain, num_inputs, X_train, X_test):
 
     print('ae model summary: ')
     ae_model.summary()
-    if encoder_name == 'autoencoder1':
-        encoder = Model(ae_model.input, ae_model.get_layer('max_pooling1d_1').output)
-    else:
-        encoder = Model(ae_model.input, ae_model.get_layer('encoded_layer').output)
+    encoder = Model(ae_model.input, ae_model.get_layer('encoded_layer').output)
 
     # encoder = Model(input_layer, encoded)
 
