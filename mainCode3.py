@@ -3,7 +3,8 @@ import time
 
 # import discord
 from keras.callbacks import EarlyStopping
-from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Dropout, LSTM, Flatten, AveragePooling1D, Layer
+from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Dropout, LSTM, Flatten, AveragePooling1D,\
+    Layer, Reshape, MultiHeadAttention
 from keras.models import Model, Sequential
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow import keras
@@ -18,7 +19,7 @@ from helperFunctions import *
 3. adjust creation of training data ( ) to include FVG and distance from daily satyATR lines
 """
 
-encoder_name = 'autoencoder2bb'
+encoder_name = 'autoencoder1'
 delta_model_name = 'deltaModel1'
 trade_model_name = 'tradeModel1'
 group_name = 'groupTransformer'
@@ -36,7 +37,7 @@ t_batch_size = 6
 t_lookback = 20
 desired_delta = 1  # 1 for training, 0.5 for testing
 patience = 10
-retrain_encoder = True
+retrain_encoder = False
 retrain_delta_model = True
 retrain_trade_model = True
 
@@ -546,74 +547,92 @@ def get_encoder(retrain, num_inputs, X_train, X_test):
 
     return encoder
 
+#
+# class MultiHeadAttention(Layer):
+#     def __init__(self, d_model, num_heads):
+#         super(MultiHeadAttention, self).__init__()
+#         self.num_heads = num_heads
+#         self.d_model = d_model
+#
+#         assert d_model % self.num_heads == 0, "d_model must be divisible by num_heads"
+#
+#         self.depth = d_model // self.num_heads
+#
+#         self.wq = Dense(d_model)
+#         self.wk = Dense(d_model)
+#         self.wv = Dense(d_model)
+#         self.dense = Dense(d_model)
+#
+#     def split_heads(self, x, batch_size):
+#         x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
+#         return tf.transpose(x, perm=[0, 2, 1, 3])
+#
+#     def call(self, v, k, q):
+#         batch_size = tf.shape(q)[0]
+#
+#         q = self.wq(q)
+#         k = self.wk(k)
+#         v = self.wv(v)
+#
+#         q = self.split_heads(q, batch_size)
+#         k = self.split_heads(k, batch_size)
+#         v = self.split_heads(v, batch_size)
+#
+#         scaled_attention, attention_weights = self.scaled_dot_product_attention(q, k, v)
+#         scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])
+#         concat_attention = tf.reshape(scaled_attention, (batch_size, -1, self.d_model))
+#
+#         output = self.dense(concat_attention)
+#
+#         return output, attention_weights
+#
+#     def scaled_dot_product_attention(self, q, k, v):
+#         matmul_qk = tf.matmul(q, k, transpose_b=True)
+#         dk = tf.cast(tf.shape(k)[-1], tf.float32)
+#         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
+#
+#         attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
+#         output = tf.matmul(attention_weights, v)
+#
+#         return output, attention_weights
 
-class MultiHeadAttention(Layer):
-    def __init__(self, d_model, num_heads):
-        super(MultiHeadAttention, self).__init__()
-        self.num_heads = num_heads
-        self.d_model = d_model
-
-        assert d_model % self.num_heads == 0, "d_model must be divisible by num_heads"
-
-        self.depth = d_model // self.num_heads
-
-        self.wq = Dense(d_model)
-        self.wk = Dense(d_model)
-        self.wv = Dense(d_model)
-        self.dense = Dense(d_model)
-
-    def split_heads(self, x, batch_size):
-        x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
-        return tf.transpose(x, perm=[0, 2, 1, 3])
-
-    def call(self, v, k, q):
-        batch_size = tf.shape(q)[0]
-
-        q = self.wq(q)
-        k = self.wk(k)
-        v = self.wv(v)
-
-        q = self.split_heads(q, batch_size)
-        k = self.split_heads(k, batch_size)
-        v = self.split_heads(v, batch_size)
-
-        scaled_attention, attention_weights = self.scaled_dot_product_attention(q, k, v)
-        scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])
-        concat_attention = tf.reshape(scaled_attention, (batch_size, -1, self.d_model))
-
-        output = self.dense(concat_attention)
-
-        return output, attention_weights
-
-    def scaled_dot_product_attention(self, q, k, v):
-        matmul_qk = tf.matmul(q, k, transpose_b=True)
-        dk = tf.cast(tf.shape(k)[-1], tf.float32)
-        scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
-
-        attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
-        output = tf.matmul(attention_weights, v)
-
-        return output, attention_weights
 
 def create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads):
+    f1 = 64
+    f2 = 128
+    f3 = 256
+    d1 = 4080
+    d2 = 64
+    d_model = 128
+
     inputs = Input(shape=input_shape)
 
     # CNN layers with average pooling
-    x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(inputs)
+    x = Conv1D(filters=f1, kernel_size=3, activation='relu', padding='same')(inputs)
     x = AveragePooling1D(pool_size=2, padding='same')(x)
-    x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(x)
+    x = Conv1D(filters=f2, kernel_size=3, activation='relu', padding='same')(x)
     x = AveragePooling1D(pool_size=2, padding='same')(x)
-    x = Conv1D(filters=256, kernel_size=3, activation='relu', padding='same')(x)
-    x = AveragePooling1D(pool_size=2, padding='same')(x)
+    # x = Conv1D(filters=f3, kernel_size=3, activation='relu', padding='same')(x)
+    # x = AveragePooling1D(pool_size=2, padding='same')(x)
+    print(x.shape)
+    # Calculate the sequence length after pooling
+    seq_length = input_shape[0]
+    for _ in range(2):  # Three pooling layers
+        seq_length = (seq_length + 1) // 2
 
+    # Reshape for Multi-Head Attention layer
+    x = Reshape((seq_length, d_model))(x)  # Ensure depth matches the Conv1D filters
+    print(x.shape)
     # Multi-Head Attention layer
-    attention, _ = MultiHeadAttention(d_model=d_model, num_heads=num_heads)(x, x, x)
+    attention = MultiHeadAttention(key_dim=d_model, num_heads=num_heads)(x, x)
+    print(attention.shape)
 
     # Flatten and fully connected layers
     x = Flatten()(attention)
-    x = Dense(4080, activation='relu')(x)
+    print(x.shape)
+    x = Dense(d1, activation='relu')(x)
     x = Dropout(0.5)(x)
-    x = Dense(80, activation='relu')(x)
+    x = Dense(d2, activation='relu')(x)
     x = Dropout(0.5)(x)
     outputs = Dense(2, activation='linear')(x)
 
@@ -651,25 +670,39 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
 
     return delta_model
 
+
 def create_cnn_with_attention_for_trade_model(input_shape, d_model, num_heads):
+    f1 = 64
+    f2 = 128
+    f3 = 256
+    d1 = 4080
+    d2 = 64
     inputs = Input(shape=input_shape)
 
     # CNN layers with average pooling
-    x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(inputs)
+    x = Conv1D(filters=f1, kernel_size=3, activation='relu', padding='same')(inputs)
     x = AveragePooling1D(pool_size=2, padding='same')(x)
-    x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(x)
+    x = Conv1D(filters=f2, kernel_size=3, activation='relu', padding='same')(x)
     x = AveragePooling1D(pool_size=2, padding='same')(x)
-    x = Conv1D(filters=256, kernel_size=3, activation='relu', padding='same')(x)
+    x = Conv1D(filters=f3, kernel_size=3, activation='relu', padding='same')(x)
     x = AveragePooling1D(pool_size=2, padding='same')(x)
+
+    # Calculate the sequence length after pooling
+    seq_length = input_shape[0]
+    for _ in range(3):  # Three pooling layers
+        seq_length = (seq_length + 1) // 2
+
+    # Reshape for Multi-Head Attention layer
+    x = Reshape((seq_length, 256))(x)  # Ensure depth matches the Conv1D filters
 
     # Multi-Head Attention layer
     attention, _ = MultiHeadAttention(d_model=d_model, num_heads=num_heads)(x, x, x)
 
     # Flatten and fully connected layers
     x = Flatten()(attention)
-    x = Dense(4080, activation='relu')(x)
+    x = Dense(d1, activation='relu')(x)
     x = Dropout(0.5)(x)
-    x = Dense(64, activation='relu')(x)
+    x = Dense(d2, activation='relu')(x)
     x = Dropout(0.5)(x)
     outputs = Dense(2, activation='sigmoid')(x)
 
@@ -764,6 +797,7 @@ def run_pipeline(data):
     delta_model = get_delta_model(retrain_delta_model, train_combined, y_train, test_combined, y_test)
     train_combined, y_train = create3dDataset(train_combined, y_train, delta_lookback)
     test_combined, y_test = create3dDataset(test_combined, y_test, delta_lookback)
+    print(f'delta model summary: {delta_model.summary()}')
     # display_test_results2(delta_model, test_combined, y_test)
 
     # Get delta model predictions
@@ -787,8 +821,9 @@ def run_pipeline(data):
     # Get trade model and test it
     trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features,
                                   trade_labels_test)
-    trade_labels_test = trade_labels_test[t_lookback:]
+    trade_labels_test = trade_labels_test[delta_lookback:]
     print(f'trade_labels_test shape: {trade_labels_test.shape}')
+    print(f'trade model summary: {trade_model.summary()}')
 
     # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_lookback)
     test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_lookback)
