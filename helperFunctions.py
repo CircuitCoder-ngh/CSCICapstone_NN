@@ -104,8 +104,7 @@ def createConfusionMatrix(model, model_name, group_name, t_data, t_labels, thres
 
 
 def create3dDataset(dataset, data_labels, look_back):  # look_back must be 1 w/ current setup
-    """Converts input tensor from 2d to 3d
-    (intended to format data for LSTM layer)"""
+    """Converts input tensor from 2d to 3d"""
     dataX, dataY = [], []
     for i in range(len(dataset) - look_back):  # removed -1 after tradeModel7
         a = dataset[i:(i + look_back), :]  # [...:i, 0] would only add the val from col[0]
@@ -113,15 +112,8 @@ def create3dDataset(dataset, data_labels, look_back):  # look_back must be 1 w/ 
         if data_labels is not None:
             dataY.append(data_labels[i + look_back])
 
-    # x = []
-    # for i in range(look_back, len(dataset)):
-    #     x.append(dataset[i - look_back:i, :])  # [...:i, 0] would only add the val from col[0]
-    # x = np.array(x)
-
     dataX = np.array(dataX)
     dataY = np.array(dataY)
     print(dataX.shape)
     print(dataY.shape)
-    # reshape input to be [samples, time steps, features]
-    # x = np.reshape(x, (x.shape[0], look_back, x.shape[2]))  # this line is redundant
     return dataX, dataY

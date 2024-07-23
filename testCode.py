@@ -170,3 +170,211 @@
 # datetime_str = "2024-05-22 10:00:00"
 # timestamp = relative_time_of_day(datetime_str)
 # print(timestamp)  # Output: 35700
+
+# def plot_predictions(trade_model, unscaled_data, features, t_labels):
+#     """
+#     Plots a line chart from the data and adds markers at points where predictions are 1.
+#     Aligns predictions with the end of the data if they are different lengths.
+#     Also plots actual values if provided.
+#
+#     Parameters:
+#     data (list or array-like): The data to plot.
+#     predictions (list or array-like): The predictions from the Keras model with two channels (up and down).
+#     actual_vals (list or array-like, optional): The actual values to plot (up and down).
+#     """
+#     # (data, predictions, actual_vals)
+#     print(f'unscaled_data.shape == {unscaled_data.shape}')
+#     unscaled_data = unscaled_data[:-trade_window]
+#     predictions = trade_model.predict(features)
+#     dif = unscaled_data.shape[0] - features.shape[0]
+#     data = unscaled_data.iloc[dif:, 0].reset_index(drop=True)
+#
+#     plt.figure(figsize=(10, 6))
+#
+#     # Plot the data as a line chart
+#     plt.plot(data, label='Data', color='blue')
+#
+#     print(f'unscaled data shape == {unscaled_data.shape}')
+#     print(f'features shape == {features.shape}')
+#     print(f'dif == {dif}')
+#     print(f'data shape == {data.shape}')
+#     print(f'predictions shape == {predictions.shape}')
+#
+#     up_labels = predictions[:, 0]
+#     down_labels = predictions[:, 1]
+#     scaler = MinMaxScaler()
+#     up_predictions = up_labels.reshape(-1, 1)
+#     down_predictions = down_labels.reshape(-1, 1)
+#     scaled_up_predictions = scaler.fit_transform(up_predictions)
+#     scaled_down_predictions = scaler.fit_transform(down_predictions)
+#
+#     # Round to 0 or 1 based on the threshold
+#     binary_up_predictions = np.where(scaled_up_predictions >= up_threshold, 1, 0)
+#     binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
+#     combined_predictions = np.column_stack((binary_up_predictions, binary_down_predictions))
+#
+#     print(f'combined preds shape == {combined_predictions.shape}')
+#     print(f't_labels shape == {t_labels.shape}')
+#
+#     # Calculate the starting index to align predictions with the end of the data
+#     start_index = len(data) - len(t_labels)
+#     print(f'start index == {start_index}')
+#     # Plot the actual values if provided
+#     if t_labels is not None:
+#         for i, (up_pred, down_pred) in enumerate(t_labels):
+#             if up_pred == 1:
+#                 x1 = start_index + i
+#                 y1 = data[start_index + i]
+#                 # plt.plot(x1, y1, color='black', marker='o')
+#                 x_vals = [x1, x1 + trade_window]
+#                 y_vals = [y1, y1 + desired_delta]
+#                 plt.plot(x_vals, y_vals, color="green")
+#             if down_pred == 1:
+#                 x1 = start_index + i
+#                 y1 = data[start_index + i]
+#                 # plt.plot(x1, y1, color='black', marker='o')
+#                 x_vals = [x1, x1 + trade_window]
+#                 y_vals = [y1, y1 - desired_delta]
+#                 plt.plot(x_vals, y_vals, color="red")
+#
+#     # Calculate the starting index to align predictions with the end of the data
+#     start_index = len(data) - len(predictions)
+#     wu = 0
+#     lu = 0
+#     wd = 0
+#     ld = 0
+#     # Add markers for up and down predictions
+#     for i, (up_pred, down_pred) in enumerate(combined_predictions):
+#         if up_pred == 1:
+#             # TODO: figure out why '-12' made predictions line up w/ actual values
+#             if t_labels[i - 12, 0] == 1:
+#                 plt.plot(start_index + i, data[start_index + i], color='green', marker='o')
+#                 wu += 1
+#             else:
+#                 plt.plot(start_index + i, data[start_index + i], color='k', marker='o')
+#                 lu += 1
+#         if down_pred == 1:
+#             if t_labels[i - 12, 1] == 1:
+#                 wd += 1
+#                 plt.plot(start_index + i, data[start_index + i], color='red', marker='o')
+#             else:
+#                 ld += 1
+#                 plt.plot(start_index + i, data[start_index + i], color='k', marker='o')
+#
+#     print(f'wu == {wu}, lu == {lu}')
+#     print(f'wd == {wd}, ld == {ld}')
+#     acc = (wu + wd) / (wu + wd + lu + ld)
+#     print(f'accuracy == {acc}')
+#
+#     plt.xlabel('Index')
+#     plt.ylabel('Value')
+#     plt.title('Line Chart with Predictions')
+#     plt.legend()
+#     plt.show()
+#
+# def plot_signals_chart(trade_model, unscaled_data, features, split_index, t_labels):
+#     # Initialize the plot and closing prices
+#     plt.figure(figsize=(10, 6))
+#     print(f'features shape == {features.shape}')
+#     print(f'unscaled data shape == {unscaled_data.shape}')
+#     labels = trade_model.predict(features)
+#     dif = len(unscaled_data) - len(labels)
+#     closing_prices = unscaled_data.iloc[dif:, 0].reset_index(drop=True)
+#     print(f'labels shape == {labels.shape}')
+#     print(f't_labels shape == {t_labels.shape}')
+#     print(f'closing_prices shape == {closing_prices.shape}')
+#
+#     # Get indices where labels are 1
+#     up_labels = labels[:, 0]
+#     down_labels = labels[:, 1]
+#     up_marker_indices = []
+#     down_marker_indices = []
+#     for i in range(len(up_labels)):
+#         if up_labels[i] == 1:
+#             up_marker_indices.append(i)
+#     for i in range(len(down_labels)):
+#         if down_labels[i] == 1:
+#             down_marker_indices.append(i)
+#
+#     scaler = MinMaxScaler()
+#     up_predictions = up_labels.reshape(-1, 1)
+#     down_predictions = down_labels.reshape(-1, 1)
+#
+#     scaled_up_predictions = scaler.fit_transform(up_predictions)
+#     # scaled_up_predictions = np.array(scaled_up_predictions)
+#
+#     scaled_down_predictions = scaler.fit_transform(down_predictions)
+#
+#     # Round to 0 or 1 based on the threshold
+#     # binary_predictions = (predictions > threshold).astype(int)
+#     binary_up_predictions = np.where(scaled_up_predictions >= up_threshold, 1, 0)
+#     binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
+#     up_marker_indices = np.where(binary_up_predictions == 1)[0]
+#     down_marker_indices = np.where(binary_down_predictions == 1)[0]
+#     tup_marker_indices = np.where(t_labels[:, 0] == 1)[0]
+#     tdown_marker_indices = np.where(t_labels[:, 1] == 1)[0]
+#     # print(f'up_marker_indices: {up_marker_indices}')
+#     # print(f'down_marker_indices: {down_marker_indices}')
+#     # print(f'closing_prices.iloc[up_marker_indices: {closing_prices.iloc[up_marker_indices]}')
+#     # print(f'closing_prices.iloc[down_marker_indices: {closing_prices.iloc[down_marker_indices]}')
+#     # print(f'len closing_prices: {len(closing_prices)}')
+#     # print(f'len binup predictions: {len(binary_up_predictions)}')
+#     # print(f'len features: {len(features)}')
+#
+#     # Plot markers on the same graph
+#     # plt.plot(closing_prices, label='Closing Price')
+#     # plt.scatter(tup_marker_indices, closing_prices.iloc[tup_marker_indices],  # '+ dif'
+#     #             color='green', label='Long', marker='o')
+#     # plt.scatter(tdown_marker_indices, closing_prices.iloc[tdown_marker_indices],
+#     #             color='red', label='Short', marker='o')
+#     #
+#     # # Add lines based on the conditions
+#     # for idx in tup_marker_indices:
+#     #     x_values = [idx, idx + trade_window]
+#     #     y_values = [closing_prices.iloc[idx], closing_prices.iloc[idx] + desired_delta]
+#     #     # if t_labels[idx, 0] == 1:
+#     #     if up_labels[idx] == 1:
+#     #         plt.plot(x_values, y_values, color='green')
+#     #     else:
+#     #         plt.plot(x_values, y_values, color='black')
+#     #
+#     # for idx in tdown_marker_indices:
+#     #     x_values = [idx, idx + trade_window]
+#     #     y_values = [closing_prices.iloc[idx], closing_prices.iloc[idx] - desired_delta]
+#     #     # if t_labels[idx, 1] == 1:
+#     #     if down_labels[idx] == 1:
+#     #         plt.plot(x_values, y_values, color='red')
+#     #     else:
+#     #         plt.plot(x_values, y_values, color='black')
+#     #
+#     # wu = 0
+#     # lu = 0
+#     # wd = 0
+#     # ld = 0
+#     # # up_labels
+#     # print(f'up labels shape == {up_labels.shape}')
+#     # print(f'up labels len == {len(up_labels)}')
+#     # for i in range(len(up_labels)):
+#     #     if up_labels[i] == 1:
+#     #         if up_labels[i] == t_labels[i, 0]:
+#     #             wu += 1
+#     #         else:
+#     #             lu += 1
+#     # for i in range(len(down_labels)):
+#     #     if down_labels[i] == 1:
+#     #         if down_labels[i] == t_labels[i, 1]:
+#     #             wd += 1
+#     #         else:
+#     #             ld += 1
+#     #
+#     # print(f'wu == {wu}, lu == {lu}')
+#     # print(f'wd == {wd}, ld == {ld}')
+#     # acc = (wu + wd) / (wu + wd + lu + ld)
+#     # print(f'accuracy == {acc}')
+#     #
+#     # # Add labels and title
+#     # plt.title('Closing Prices with Markers')
+#     # plt.xlabel('Time')
+#     # plt.ylabel('Closing Price')
+#     # plt.legend()
+#     # plt.show()

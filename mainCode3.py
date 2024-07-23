@@ -3,10 +3,11 @@ import time
 
 # import discord
 from keras.callbacks import EarlyStopping
-from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Dropout, LSTM
+from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Dropout, LSTM, Flatten, AveragePooling1D, Layer
 from keras.models import Model, Sequential
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow import keras
+import tensorflow as tf
 from helperFunctions import *
 
 
@@ -17,25 +18,27 @@ from helperFunctions import *
 3. adjust creation of training data ( ) to include FVG and distance from daily satyATR lines
 """
 
-encoder_name = 'autoencoder2bb'
-delta_model_name = 'deltaModel4bb'
-trade_model_name = 'tradeModel8bb'
+encoder_name = 'autoencoder1'
+delta_model_name = 'deltaModel1'
+trade_model_name = 'tradeModel1'
 group_name = 'groupTransformer'
-up_threshold = 0.8
-down_threshold = 0.8
-trade_window = 6  # 12  # distance to predict price delta and trade opportunity
+up_threshold = 0.9
+down_threshold = 0.9
+trade_window = 12    # distance to predict price delta and trade opportunity
 window_size = 40  # window size (for CNN lookback)
 ae_epochs = 200  # for autoencoder
-ae_batch_size = 6  # 6
+ae_batch_size = 6
 d_epochs = 200  # for delta model
-d_batch_size = 12
+d_batch_size = 6
+delta_lookback = 20
 t_epochs = 200  # for trade model
-t_batch_size = 12
+t_batch_size = 6
+t_lookback = 20
 desired_delta = 1  # 1 for training, 0.5 for testing
-patience = 6
-retrain_encoder = False
-retrain_delta_model = False
-retrain_trade_model = False
+patience = 10
+retrain_encoder = True
+retrain_delta_model = True
+retrain_trade_model = True
 
 # deprecated variables
 one_output = False  # used to indicate use of LSTM
@@ -200,7 +203,7 @@ def create_trade_labels(data, trade_window, desired_delta, one_output, deltaMode
     return combined_labels
 
 
-def createConfusionMatrices(model, model_name, group_name, t_data, t_labels, threshold):
+def createConfusionMatrices(model, model_name, group_name, t_data, t_labels):
     """Creates and saves two confusion matrices to display results of trade opp model w/ 2 outputs
     Parameters: model, a chosen name for the model, the group name, and test data appropriate for the model"""
     predictions = model.predict(t_data)  # .reshape(-1)
@@ -438,14 +441,14 @@ def plot_predictions(trade_model, unscaled_data, features, t_labels):
     for i, (up_pred, down_pred) in enumerate(combined_predictions):
         if up_pred == 1:
             # TODO: figure out why '-12' made predictions line up w/ actual values
-            if t_labels[i - 12, 0] == 1:
+            if t_labels[i, 0] == 1:
                 plt.plot(start_index + i, data[start_index + i], color='green', marker='o')
                 wu += 1
             else:
                 plt.plot(start_index + i, data[start_index + i], color='k', marker='o')
                 lu += 1
         if down_pred == 1:
-            if t_labels[i - 12, 1] == 1:
+            if t_labels[i, 1] == 1:
                 wd += 1
                 plt.plot(start_index + i, data[start_index + i], color='red', marker='o')
             else:
@@ -544,37 +547,94 @@ def get_encoder(retrain, num_inputs, X_train, X_test):
     return encoder
 
 
+class MultiHeadAttention(Layer):
+    def __init__(self, d_model, num_heads):
+        super(MultiHeadAttention, self).__init__()
+        self.num_heads = num_heads
+        self.d_model = d_model
+
+        assert d_model % self.num_heads == 0, "d_model must be divisible by num_heads"
+
+        self.depth = d_model // self.num_heads
+
+        self.wq = Dense(d_model)
+        self.wk = Dense(d_model)
+        self.wv = Dense(d_model)
+        self.dense = Dense(d_model)
+
+    def split_heads(self, x, batch_size):
+        x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
+        return tf.transpose(x, perm=[0, 2, 1, 3])
+
+    def call(self, v, k, q):
+        batch_size = tf.shape(q)[0]
+
+        q = self.wq(q)
+        k = self.wk(k)
+        v = self.wv(v)
+
+        q = self.split_heads(q, batch_size)
+        k = self.split_heads(k, batch_size)
+        v = self.split_heads(v, batch_size)
+
+        scaled_attention, attention_weights = self.scaled_dot_product_attention(q, k, v)
+        scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])
+        concat_attention = tf.reshape(scaled_attention, (batch_size, -1, self.d_model))
+
+        output = self.dense(concat_attention)
+
+        return output, attention_weights
+
+    def scaled_dot_product_attention(self, q, k, v):
+        matmul_qk = tf.matmul(q, k, transpose_b=True)
+        dk = tf.cast(tf.shape(k)[-1], tf.float32)
+        scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
+
+        attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
+        output = tf.matmul(attention_weights, v)
+
+        return output, attention_weights
+
+def create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads):
+    inputs = Input(shape=input_shape)
+
+    # CNN layers with average pooling
+    x = Conv1D(filters=64, kernel_size=3, activation='relu')(inputs)
+    x = AveragePooling1D(pool_size=2)(x)
+    x = Conv1D(filters=128, kernel_size=3, activation='relu')(x)
+    x = AveragePooling1D(pool_size=2)(x)
+    x = Conv1D(filters=256, kernel_size=3, activation='relu')(x)
+    x = AveragePooling1D(pool_size=2)(x)
+
+    # Multi-Head Attention layer
+    attention, _ = MultiHeadAttention(d_model=d_model, num_heads=num_heads)(x, x, x)
+
+    # Flatten and fully connected layers
+    x = Flatten()(attention)
+    x = Dense(4080, activation='relu')(x)
+    x = Dropout(0.5)(x)
+    x = Dense(80, activation='relu')(x)
+    x = Dropout(0.5)(x)
+    outputs = Dense(2, activation='linear')(x)
+
+    model = Model(inputs=inputs, outputs=outputs)
+    return model
+
+
 def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
     # # Define the price delta prediction model
     # # [samples, window_size / 4, # filters in last CNN]
     # #          -flatten & concat-> [samples, (20 / 4 * 64 = 320) + # of features] -> [samples, 320 + # of features]
     if retrain:
-        # delta_model = Sequential([  # used for deltaModel1
-        #     Dense(320, activation='relu', input_shape=(train_combined.shape[1],)),
-        #     Dropout(0.5),
-        #     Dense(160, activation='relu'),
-        #     Dropout(0.5),
-        #     Dense(80, activation='relu'),
-        #     Dropout(0.5),
-        #     Dense(2, activation='linear')
-        # ])
-        if d_num_of_lstm > 0:
-            train_combined, y_train = create3dDataset(train_combined, y_train, d_look_back)
-            test_combined, y_test = create3dDataset(test_combined, y_test, d_look_back)
-        delta_model = Sequential([  # used for deltaModel2
-            LSTM(d_lstm_units, activation='relu', input_shape=(train_combined.shape[1], train_combined.shape[2]),
-                 return_sequences=False),  # , kernel_constraint=max_norm(kc)
-            # output shape of LSTM: (batch_size, lstm_units), or for RST: (batch_size, timesteps, lstm_units)
-            # timesteps == train_combined.shape[1]
-            Dense(4080, activation='relu'),
-            Dropout(0.5),
-            # Dense(160, activation='relu'),
-            # Dropout(0.5),
-            Dense(80, activation='relu'),
-            Dropout(0.5),
-            Dense(2, activation='linear')
-        ])
+        # Ensure the input shape is correct for the CNN model
+        train_combined, y_train = create3dDataset(train_combined, y_train, delta_lookback)
+        test_combined, y_test = create3dDataset(test_combined, y_test, delta_lookback)
+        input_shape = (train_combined.shape[1], train_combined.shape[2])
 
+        # Create the CNN model with multi-head attention and average pooling
+        d_model = 256  # Adjust as needed
+        num_heads = 4  # Adjust as needed
+        delta_model = create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads)
         # Compile the model
         delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
@@ -591,53 +651,43 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
 
     return delta_model
 
+def create_cnn_with_attention_for_trade_model(input_shape, d_model, num_heads):
+    inputs = Input(shape=input_shape)
+
+    # CNN layers with average pooling
+    x = Conv1D(filters=64, kernel_size=3, activation='relu')(inputs)
+    x = AveragePooling1D(pool_size=2)(x)
+    x = Conv1D(filters=128, kernel_size=3, activation='relu')(x)
+    x = AveragePooling1D(pool_size=2)(x)
+    x = Conv1D(filters=256, kernel_size=3, activation='relu')(x)
+    x = AveragePooling1D(pool_size=2)(x)
+
+    # Multi-Head Attention layer
+    attention, _ = MultiHeadAttention(d_model=d_model, num_heads=num_heads)(x, x, x)
+
+    # Flatten and fully connected layers
+    x = Flatten()(attention)
+    x = Dense(4080, activation='relu')(x)
+    x = Dropout(0.5)(x)
+    x = Dense(64, activation='relu')(x)
+    x = Dropout(0.5)(x)
+    outputs = Dense(2, activation='sigmoid')(x)
+
+    model = Model(inputs=inputs, outputs=outputs)
+    return model
+
 
 def get_trade_model(retrain, train_features, trade_labels_train, test_features, trade_labels_test):
     if retrain:
-        # trade_model = Sequential([  # used for tradeModel1
-        #     Dense(340, activation='relu', input_shape=(train_features.shape[1],)),
-        #     Dropout(0.5),
-        #     Dense(170, activation='relu'),
-        #     Dropout(0.5),
-        #     Dense(85, activation='relu'),
-        #     Dropout(0.5),
-        #     Dense(1, activation='sigmoid')  # Assuming binary classification for trade opportunity
-        # ])
-        if t_num_of_lstm > 0:
-            train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
-            test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_look_back)
-        # trade_model = Sequential([
-        #     # used for tradeModel2,3,4; tradeModel3 had lookback 3, tradeModel4 had lookback 12
-        #     LSTM(t_lstm_units, activation='relu', input_shape=(train_features.shape[1], train_features.shape[2]),
-        #          return_sequences=False),  # , kernel_constraint=max_norm(kc)
-        #     Dense(340, activation='relu'),
-        #     Dropout(0.5),
-        #     Dense(170, activation='relu'),
-        #     Dropout(0.5),
-        #     Dense(85, activation='relu'),
-        #     Dropout(0.5),
-        #     Dense(2, activation='sigmoid')
-        # ])
-        trade_model = Sequential([  # made for tradeModel5,6,7
-            LSTM(t_lstm_units, activation='relu', input_shape=(train_features.shape[1], train_features.shape[2]),
-                 return_sequences=False),  # , kernel_constraint=max_norm(kc)
-            # Dropout(0.5),
-            # LSTM(int(t_lstm_units/2), activation='relu', return_sequences=False),
-            # output shape of LSTM: (batch_size, lstm_units), or for RST: (batch_size, timesteps, lstm_units)
-            Dense(4080, activation='relu'),
-            Dropout(0.5),
-            # Dense(1020, activation='relu'),
-            # Dropout(0.5),
-            # Dense(510, activation='relu'),
-            # Dropout(0.5),
-            # Dense(255, activation='relu'),
-            # Dropout(0.5),
-            # Dense(128, activation='relu'),
-            # Dropout(0.5),
-            Dense(64, activation='relu'),
-            Dropout(0.5),
-            Dense(2, activation='sigmoid')
-        ])
+        # Ensure the input shape is correct for the CNN model
+        train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_lookback)
+        test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_lookback)
+        input_shape = (train_features.shape[1], train_features.shape[2])
+
+        # Create the CNN model with multi-head attention and average pooling
+        d_model = 256  # Adjust as needed
+        num_heads = 4  # Adjust as needed
+        trade_model = create_cnn_with_attention_for_trade_model(input_shape, d_model, num_heads)
 
         trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
 
@@ -675,6 +725,87 @@ def refresh_live_data(interval):
 
 
 def run_pipeline(data):
+    # ----create training/test data (X) and training/test labels (y)----
+    unscaled_data, scaled_data = normalizeData(data)
+    X, y, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta)
+
+    # Split the data sequentially
+    split_index = int(len(X) * 0.8)
+    X_train, X_test = X[:split_index], X[split_index:]
+    y_train, y_test = y[:split_index], y[split_index:]
+    num_inputs = X_train.shape[2]
+    print(f'X_train shape: {X_train.shape} ...is [2] == num of inputs?')
+    print(f'y_train shape: {y_train.shape} ...is [0] == X_train[0]')
+    print(f'X_test shape: {X_test.shape}')
+    print(f'y_test shape: {y_test.shape}')
+    print(f'num inputs: {num_inputs}')
+
+    encoder = get_encoder(retrain_encoder, num_inputs, X_train, X_test)
+    # Encode the train and test data
+    encoded_train = encoder.predict(X_train)
+    encoded_test = encoder.predict(X_test)
+
+    # Flatten encoded features
+    encoded_train_flat = encoded_train.reshape(encoded_train.shape[0], -1)
+    encoded_test_flat = encoded_test.reshape(encoded_test.shape[0], -1)
+
+    # Combine encoded features with raw data
+    train_combined = np.hstack((encoded_train_flat, X_train[:, -1, :]))
+    test_combined = np.hstack((encoded_test_flat, X_test[:, -1, :]))
+    # train_combined_cpy = train_combined.copy()
+    # test_combined_cpy = test_combined.copy()
+
+    print(f'train_combined shape: {train_combined.shape}')
+    print(f'y_train shape: {y_train.shape}')
+    print(f'test_combined shape: {test_combined.shape}')
+    print(f'y_test shape: {y_test.shape}')
+
+    # Get delta model
+    delta_model = get_delta_model(retrain_delta_model, train_combined, y_train, test_combined, y_test)
+    train_combined, y_train = create3dDataset(train_combined, y_train, delta_lookback)
+    test_combined, y_test = create3dDataset(test_combined, y_test, delta_lookback)
+    # display_test_results2(delta_model, test_combined, y_test)
+
+    # Get delta model predictions
+    predicted_deltas_train = delta_model.predict(train_combined)
+    predicted_deltas_test = delta_model.predict(test_combined)
+
+    # Combine (encoded features + X data) with predicted deltas for the trade model
+    train_features = np.hstack(
+        (train_combined[:, -1, :], predicted_deltas_train))
+    test_features = np.hstack((test_combined[:, -1, :], predicted_deltas_test))
+
+    # Split trading labels into train and test set
+    trade_labels_train, trade_labels_test = z[:split_index], z[split_index:]
+    test_features2 = test_features.copy()
+
+    print(f'train_features shape: {train_features.shape}')
+    print(f'test_features shape: {test_features.shape}')
+    print(f'trade_labels_train shape: {trade_labels_train.shape}')
+    print(f'trade_labels_test shape: {trade_labels_test.shape}')
+
+    # Get trade model and test it
+    trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features,
+                                  trade_labels_test)
+    # trade_labels_test = trade_labels_test[t_lookback:]
+    print(f'trade_labels_test shape: {trade_labels_test.shape}')
+
+    # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
+    test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_look_back)
+    createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test)
+    plot_predictions(trade_model, unscaled_data, test_features, trade_labels_test)
+
+    # Testing model w/ labels for half the desired delta
+    t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
+    trade_labels_test2 = z[split_index:]
+    # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
+    test_features2, trade_labels_test2 = create3dDataset(test_features2, trade_labels_test2, t_look_back)
+    td_name = trade_model_name + '_halvedLabels'
+    createConfusionMatrices(trade_model, td_name, group_name, test_features2, trade_labels_test2)
+    plot_predictions(trade_model, unscaled_data, test_features2, trade_labels_test2)
+
+
+def run_pipeline_deprecated(data):
     # ----create training/test data (X) and training/test labels (y)----
     unscaled_data, scaled_data = normalizeData(data)
     X, y, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta)
@@ -938,7 +1069,7 @@ while live:
 
 
 # retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
-raw_list = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[:-trade_window]
+raw_list = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[:-trade_window-2]
 # split = int(len(raw_list) / 3)
 # raw_list = raw_list[2*split:]
 run_pipeline(raw_list)
