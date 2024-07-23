@@ -14,11 +14,11 @@ from helperFunctions import *
 """Changes from mainCode2...
 1. adjusted timestamp input to accurately represent relative time of day (math was wrong)
 2. adjusted create_trade_labels, still needs rework
-- created ae2b + dm4b + tm8b -> 8bb=mainCode2.ae8+fixedTimeInput, 8b=mainCode2.ae8+fixedTimeInput+batchsize12
+- created ae2b + dm4b + tm8b -> 8bb=mainCode2.ae8+fixedTimeInput, 8b=mainCode2.ae8+fixedTimeInput+aebatchsize12
 3. adjust creation of training data ( ) to include FVG and distance from daily satyATR lines
 """
 
-encoder_name = 'autoencoder1'
+encoder_name = 'autoencoder2bb'
 delta_model_name = 'deltaModel1'
 trade_model_name = 'tradeModel1'
 group_name = 'groupTransformer'
@@ -599,12 +599,12 @@ def create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads):
     inputs = Input(shape=input_shape)
 
     # CNN layers with average pooling
-    x = Conv1D(filters=64, kernel_size=3, activation='relu')(inputs)
-    x = AveragePooling1D(pool_size=2)(x)
-    x = Conv1D(filters=128, kernel_size=3, activation='relu')(x)
-    x = AveragePooling1D(pool_size=2)(x)
-    x = Conv1D(filters=256, kernel_size=3, activation='relu')(x)
-    x = AveragePooling1D(pool_size=2)(x)
+    x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(inputs)
+    x = AveragePooling1D(pool_size=2, padding='same')(x)
+    x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(x)
+    x = AveragePooling1D(pool_size=2, padding='same')(x)
+    x = Conv1D(filters=256, kernel_size=3, activation='relu', padding='same')(x)
+    x = AveragePooling1D(pool_size=2, padding='same')(x)
 
     # Multi-Head Attention layer
     attention, _ = MultiHeadAttention(d_model=d_model, num_heads=num_heads)(x, x, x)
@@ -655,12 +655,12 @@ def create_cnn_with_attention_for_trade_model(input_shape, d_model, num_heads):
     inputs = Input(shape=input_shape)
 
     # CNN layers with average pooling
-    x = Conv1D(filters=64, kernel_size=3, activation='relu')(inputs)
-    x = AveragePooling1D(pool_size=2)(x)
-    x = Conv1D(filters=128, kernel_size=3, activation='relu')(x)
-    x = AveragePooling1D(pool_size=2)(x)
-    x = Conv1D(filters=256, kernel_size=3, activation='relu')(x)
-    x = AveragePooling1D(pool_size=2)(x)
+    x = Conv1D(filters=64, kernel_size=3, activation='relu', padding='same')(inputs)
+    x = AveragePooling1D(pool_size=2, padding='same')(x)
+    x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(x)
+    x = AveragePooling1D(pool_size=2, padding='same')(x)
+    x = Conv1D(filters=256, kernel_size=3, activation='relu', padding='same')(x)
+    x = AveragePooling1D(pool_size=2, padding='same')(x)
 
     # Multi-Head Attention layer
     attention, _ = MultiHeadAttention(d_model=d_model, num_heads=num_heads)(x, x, x)
@@ -787,19 +787,19 @@ def run_pipeline(data):
     # Get trade model and test it
     trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features,
                                   trade_labels_test)
-    # trade_labels_test = trade_labels_test[t_lookback:]
+    trade_labels_test = trade_labels_test[t_lookback:]
     print(f'trade_labels_test shape: {trade_labels_test.shape}')
 
-    # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
-    test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_look_back)
+    # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_lookback)
+    test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_lookback)
     createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test)
     plot_predictions(trade_model, unscaled_data, test_features, trade_labels_test)
 
     # Testing model w/ labels for half the desired delta
     t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
     trade_labels_test2 = z[split_index:]
-    # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
-    test_features2, trade_labels_test2 = create3dDataset(test_features2, trade_labels_test2, t_look_back)
+    # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_lookback)
+    test_features2, trade_labels_test2 = create3dDataset(test_features2, trade_labels_test2, t_lookback)
     td_name = trade_model_name + '_halvedLabels'
     createConfusionMatrices(trade_model, td_name, group_name, test_features2, trade_labels_test2)
     plot_predictions(trade_model, unscaled_data, test_features2, trade_labels_test2)
