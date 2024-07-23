@@ -13,24 +13,16 @@ from helperFunctions import *
 """Changes from mainCode2...
 1. adjusted timestamp input to accurately represent relative time of day (math was wrong)
 2. adjusted create_trade_labels, still needs rework
-- created ae2b + dm4b + tm8b 
+- created ae2b + dm4b + tm8b -> 8bb=mainCode2.ae8+fixedTimeInput, 8b=mainCode2.ae8+fixedTimeInput+batchsize12
 3. adjust creation of training data ( ) to include FVG and distance from daily satyATR lines
 """
 
-encoder_name = 'autoencoder2bb'  # 1=window20, 2=window40, 3=window80+batchsize12, 4=1min+w80, 5=1min+w40
-delta_model_name = 'deltaModel4bb'  # 2=lb3, 3=lb12+u340, 4=tradewindow6+ae2, 5=ae3, 6=ae4+tw12, 7=ae5
+encoder_name = 'autoencoder2bb'
+delta_model_name = 'deltaModel4bb'
 trade_model_name = 'tradeModel8bb'
-# trade models: 3=lb3,4=lb12,5a=lb12+RSTRSF,5=RSTdoRSF+lessDenselayers, 6=moreDenseunits, 7=dm3, 8=tw6+ae2+dm4,
-# 9=ae3+dm5, 10=ae4+dm6+tw12+dd.5, 11=ae4+dm6+dd.3, 12=ae5+dm7+dd.3, 13=ae1+dm3+
-one_output = False  # used to indicate use of LSTM
 group_name = 'groupTransformer'
-d_lstm_units = 340
-t_lstm_units = 340
-d_look_back = 12  # must match deltaModel's lookback
-t_look_back = 12  # must match tradeModel's lookback
-threshold = 0.3  # default 0.7
-up_threshold = 0.9
-down_threshold = 0.9
+up_threshold = 0.8
+down_threshold = 0.8
 trade_window = 6  # 12  # distance to predict price delta and trade opportunity
 window_size = 40  # window size (for CNN lookback)
 ae_epochs = 200  # for autoencoder
@@ -41,11 +33,19 @@ t_epochs = 200  # for trade model
 t_batch_size = 12
 desired_delta = 1  # 1 for training, 0.5 for testing
 patience = 6
-d_num_of_lstm = 1
-t_num_of_lstm = 1
 retrain_encoder = False
 retrain_delta_model = False
 retrain_trade_model = False
+
+# deprecated variables
+one_output = False  # used to indicate use of LSTM
+d_lstm_units = 340
+t_lstm_units = 340
+d_look_back = 12  # must match deltaModel's lookback
+t_look_back = 12  # must match tradeModel's lookback
+threshold = 0.3  # default 0.7
+d_num_of_lstm = 1
+t_num_of_lstm = 1
 
 
 def relative_time_of_day(datetime_str):
@@ -111,24 +111,20 @@ def normalizeData(data):
 
 
 # Create dataset function (preps data for CNN autoencoder and labels for delta_model)
-def create_dataset(data, window_size, unscaled_data, trade_window, desired_delta, future_unscaled_data=None):
+def create_dataset(data, window_size, unscaled_data, trade_window, desired_delta):
     X = []
     y = []
     z = []
-    if future_unscaled_data is not None:
-        max_upward, max_downward = calculate_max_changes(future_unscaled_data, trade_window)
-        trade_labels = create_trade_labels(future_unscaled_data, trade_window, desired_delta, one_output)
-        for i in range(len(data) - window_size):  # '- trade_window' before testMode1
-            X.append(data[i:i + window_size])
-            y.append([max_upward[i + window_size], max_downward[i + window_size]])
-            z.append(trade_labels[i + window_size])
-    else:
-        max_upward, max_downward = calculate_max_changes(unscaled_data, trade_window)
-        trade_labels = create_trade_labels(unscaled_data, trade_window, desired_delta, one_output)
-        for i in range(len(data) - window_size - trade_window):
-            X.append(data[i:i + window_size])
-            y.append([max_upward[i + window_size], max_downward[i + window_size]])
-            z.append(trade_labels[i + window_size])
+    print('XXXXXXXXXXXXXXXXXX')
+    print(f'data shape == {data.shape}')
+    print(f'unscaled data shape == {unscaled_data}')
+    print('XXXXXXXXXXXXXXXXXXX')
+    max_upward, max_downward = calculate_max_changes(unscaled_data, trade_window)
+    trade_labels = create_trade_labels(unscaled_data, trade_window, desired_delta, one_output)
+    for i in range(len(data) - window_size - trade_window):
+        X.append(data[i:i + window_size])
+        y.append([max_upward[i + window_size], max_downward[i + window_size]])
+        z.append(trade_labels[i + window_size])
     # currently contains unscaled delta vals
     # y = np.vstack((max_upward, max_downward)).T
     # print('y: ')
@@ -165,8 +161,16 @@ def calculate_max_changes(data, trade_window):
         window = data.iloc[i:i + trade_window, 0]
         # print(f'window: {window}')
         # print(f'window.iloc[0] = {window.iloc[0]}')
-        max_upward_changes.append(np.max(window) - window.iloc[0])
-        max_downward_changes.append(np.min(window) - window.iloc[0])
+        max_up = np.max(window) - window.iloc[0]
+        max_down = np.min(window) - window.iloc[0]
+        if max_up > 0:
+            max_upward_changes.append(max_up)
+        else:
+            max_upward_changes.append(0)
+        if max_down < 0:
+            max_downward_changes.append(max_down)
+        else:
+            max_downward_changes.append(0)
     return np.array(max_upward_changes), np.array(max_downward_changes)
 
 
@@ -194,17 +198,6 @@ def create_trade_labels(data, trade_window, desired_delta, one_output, deltaMode
     combined_labels = np.column_stack((up_labels, down_labels))
 
     return combined_labels
-
-
-def display_test_results1(model, test_data, test_labels, trade_model_name):
-    """for displaying results of trade opportunity model w/ 1 output"""
-    # Evaluate the model on the test data
-    # model.evaluate(test_data, test_labels, verbose=0)
-
-    t_name = f'{trade_model_name}_{threshold}'
-    # Create and save confusion matrix
-    createConfusionMatrix(model, model_name=t_name, group_name=group_name, t_data=test_data,
-                          t_labels=test_labels, threshold=threshold)
 
 
 def createConfusionMatrices(model, model_name, group_name, t_data, t_labels, threshold):
@@ -261,15 +254,17 @@ def createConfusionMatrices(model, model_name, group_name, t_data, t_labels, thr
 # display_test_results1(trade_model, test_combined, y_test)
 
 
-def plot_signals_chart(trade_model, unscaled_data, features, split_index):
+def plot_signals_chart(trade_model, unscaled_data, features, split_index, t_labels):
     # Initialize the plot and closing prices
     plt.figure(figsize=(10, 6))
-    closing_prices = unscaled_data.iloc[:, 0]
+    print(f'features shape == {features.shape}')
+    print(f'unscaled data shape == {unscaled_data.shape}')
     labels = trade_model.predict(features)
-    dif = len(closing_prices) - len(labels)
-    print(f'plot_signals_chart...'
-          f'len(closing_prices) - len(labels) == {dif}')
-    closing_prices = closing_prices[dif:]
+    dif = len(unscaled_data) - len(labels)
+    closing_prices = unscaled_data.iloc[dif:, 0].reset_index(drop=True)
+    print(f'labels shape == {labels.shape}')
+    print(f't_labels shape == {t_labels.shape}')
+    print(f'closing_prices shape == {closing_prices.shape}')
 
     # Get indices where labels are 1
     up_labels = labels[:, 0]
@@ -286,8 +281,6 @@ def plot_signals_chart(trade_model, unscaled_data, features, split_index):
     scaler = MinMaxScaler()
     up_predictions = up_labels.reshape(-1, 1)
     down_predictions = down_labels.reshape(-1, 1)
-    print(f'up_pred: {up_predictions}')
-    print(f'down_pred: {down_predictions}')
 
     scaled_up_predictions = scaler.fit_transform(up_predictions)
     # scaled_up_predictions = np.array(scaled_up_predictions)
@@ -300,25 +293,173 @@ def plot_signals_chart(trade_model, unscaled_data, features, split_index):
     binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
     up_marker_indices = np.where(binary_up_predictions == 1)[0]
     down_marker_indices = np.where(binary_down_predictions == 1)[0]
-    print(f'up_marker_indices: {up_marker_indices}')
-    print(f'down_marker_indices: {down_marker_indices}')
-    print(f'closing_prices.iloc[up_marker_indices: {closing_prices.iloc[up_marker_indices]}')
-    print(f'closing_prices.iloc[down_marker_indices: {closing_prices.iloc[down_marker_indices]}')
-    print(f'len closing_prices: {len(closing_prices)}')
-    print(f'len binup predictions: {len(binary_up_predictions)}')
-    print(f'len features: {len(features)}')
+    tup_marker_indices = np.where(t_labels[:, 0] == 1)[0]
+    tdown_marker_indices = np.where(t_labels[:, 1] == 1)[0]
+    # print(f'up_marker_indices: {up_marker_indices}')
+    # print(f'down_marker_indices: {down_marker_indices}')
+    # print(f'closing_prices.iloc[up_marker_indices: {closing_prices.iloc[up_marker_indices]}')
+    # print(f'closing_prices.iloc[down_marker_indices: {closing_prices.iloc[down_marker_indices]}')
+    # print(f'len closing_prices: {len(closing_prices)}')
+    # print(f'len binup predictions: {len(binary_up_predictions)}')
+    # print(f'len features: {len(features)}')
 
     # Plot markers on the same graph
-    plt.plot(closing_prices, label='Closing Price')
-    plt.scatter(up_marker_indices+dif, closing_prices.iloc[up_marker_indices],
-                color='green', label='Long', marker='o')
-    plt.scatter(down_marker_indices+dif, closing_prices.iloc[down_marker_indices],
-                color='red', label='Short', marker='o')
+    # plt.plot(closing_prices, label='Closing Price')
+    # plt.scatter(tup_marker_indices, closing_prices.iloc[tup_marker_indices],  # '+ dif'
+    #             color='green', label='Long', marker='o')
+    # plt.scatter(tdown_marker_indices, closing_prices.iloc[tdown_marker_indices],
+    #             color='red', label='Short', marker='o')
+    #
+    # # Add lines based on the conditions
+    # for idx in tup_marker_indices:
+    #     x_values = [idx, idx + trade_window]
+    #     y_values = [closing_prices.iloc[idx], closing_prices.iloc[idx] + desired_delta]
+    #     # if t_labels[idx, 0] == 1:
+    #     if up_labels[idx] == 1:
+    #         plt.plot(x_values, y_values, color='green')
+    #     else:
+    #         plt.plot(x_values, y_values, color='black')
+    #
+    # for idx in tdown_marker_indices:
+    #     x_values = [idx, idx + trade_window]
+    #     y_values = [closing_prices.iloc[idx], closing_prices.iloc[idx] - desired_delta]
+    #     # if t_labels[idx, 1] == 1:
+    #     if down_labels[idx] == 1:
+    #         plt.plot(x_values, y_values, color='red')
+    #     else:
+    #         plt.plot(x_values, y_values, color='black')
+    #
+    # wu = 0
+    # lu = 0
+    # wd = 0
+    # ld = 0
+    # # up_labels
+    # print(f'up labels shape == {up_labels.shape}')
+    # print(f'up labels len == {len(up_labels)}')
+    # for i in range(len(up_labels)):
+    #     if up_labels[i] == 1:
+    #         if up_labels[i] == t_labels[i, 0]:
+    #             wu += 1
+    #         else:
+    #             lu += 1
+    # for i in range(len(down_labels)):
+    #     if down_labels[i] == 1:
+    #         if down_labels[i] == t_labels[i, 1]:
+    #             wd += 1
+    #         else:
+    #             ld += 1
+    #
+    # print(f'wu == {wu}, lu == {lu}')
+    # print(f'wd == {wd}, ld == {ld}')
+    # acc = (wu + wd) / (wu + wd + lu + ld)
+    # print(f'accuracy == {acc}')
+    #
+    # # Add labels and title
+    # plt.title('Closing Prices with Markers')
+    # plt.xlabel('Time')
+    # plt.ylabel('Closing Price')
+    # plt.legend()
+    # plt.show()
 
-    # Add labels and title
-    plt.title('Closing Prices with Markers')
-    plt.xlabel('Time')
-    plt.ylabel('Closing Price')
+
+def plot_predictions(trade_model, unscaled_data, features, t_labels):
+    """
+    Plots a line chart from the data and adds markers at points where predictions are 1.
+    Aligns predictions with the end of the data if they are different lengths.
+    Also plots actual values if provided.
+
+    Parameters:
+    data (list or array-like): The data to plot.
+    predictions (list or array-like): The predictions from the Keras model with two channels (up and down).
+    actual_vals (list or array-like, optional): The actual values to plot (up and down).
+    """
+    # (data, predictions, actual_vals)
+    print(f'unscaled_data.shape == {unscaled_data.shape}')
+    unscaled_data = unscaled_data[:-trade_window]
+    predictions = trade_model.predict(features)
+    dif = unscaled_data.shape[0] - features.shape[0]
+    data = unscaled_data.iloc[dif:, 0].reset_index(drop=True)
+
+    plt.figure(figsize=(10, 6))
+
+    # Plot the data as a line chart
+    plt.plot(data, label='Data', color='blue')
+
+    print(f'unscaled data shape == {unscaled_data.shape}')
+    print(f'features shape == {features.shape}')
+    print(f'dif == {dif}')
+    print(f'data shape == {data.shape}')
+    print(f'predictions shape == {predictions.shape}')
+
+    up_labels = predictions[:, 0]
+    down_labels = predictions[:, 1]
+    scaler = MinMaxScaler()
+    up_predictions = up_labels.reshape(-1, 1)
+    down_predictions = down_labels.reshape(-1, 1)
+    scaled_up_predictions = scaler.fit_transform(up_predictions)
+    scaled_down_predictions = scaler.fit_transform(down_predictions)
+
+    # Round to 0 or 1 based on the threshold
+    binary_up_predictions = np.where(scaled_up_predictions >= up_threshold, 1, 0)
+    binary_down_predictions = np.where(scaled_down_predictions >= down_threshold, 1, 0)
+    combined_predictions = np.column_stack((binary_up_predictions, binary_down_predictions))
+
+    print(f'combined preds shape == {combined_predictions.shape}')
+    print(f't_labels shape == {t_labels.shape}')
+
+    # Calculate the starting index to align predictions with the end of the data
+    start_index = len(data) - len(t_labels)
+    print(f'start index == {start_index}')
+    # Plot the actual values if provided
+    if t_labels is not None:
+        for i, (up_pred, down_pred) in enumerate(t_labels):
+            if up_pred == 1:
+                x1 = start_index + i
+                y1 = data[start_index + i]
+                # plt.plot(x1, y1, color='black', marker='o')
+                x_vals = [x1, x1 + trade_window]
+                y_vals = [y1, y1 + desired_delta]
+                plt.plot(x_vals, y_vals, color="green")
+            if down_pred == 1:
+                x1 = start_index + i
+                y1 = data[start_index + i]
+                # plt.plot(x1, y1, color='black', marker='o')
+                x_vals = [x1, x1 + trade_window]
+                y_vals = [y1, y1 - desired_delta]
+                plt.plot(x_vals, y_vals, color="red")
+
+    # Calculate the starting index to align predictions with the end of the data
+    start_index = len(data) - len(predictions)
+    wu = 0
+    lu = 0
+    wd = 0
+    ld = 0
+    # Add markers for up and down predictions
+    for i, (up_pred, down_pred) in enumerate(combined_predictions):
+        if up_pred == 1:
+            # TODO: figure out why '-12' made predictions line up w/ actual values
+            if t_labels[i - 12, 0] == 1:
+                plt.plot(start_index + i, data[start_index + i], color='green', marker='o')
+                wu += 1
+            else:
+                plt.plot(start_index + i, data[start_index + i], color='k', marker='o')
+                lu += 1
+        if down_pred == 1:
+            if t_labels[i - 12, 1] == 1:
+                wd += 1
+                plt.plot(start_index + i, data[start_index + i], color='red', marker='o')
+            else:
+                ld += 1
+                plt.plot(start_index + i, data[start_index + i], color='k', marker='o')
+
+    print(f'wu == {wu}, lu == {lu}')
+    print(f'wd == {wd}, ld == {ld}')
+    acc = (wu + wd) / (wu + wd + lu + ld)
+    print(f'accuracy == {acc}')
+
+    plt.xlabel('Index')
+    plt.ylabel('Value')
+    plt.title('Line Chart with Predictions')
     plt.legend()
     plt.show()
 
@@ -603,12 +744,15 @@ def run_pipeline(data):
     # Get trade model and test it
     trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features,
                                   trade_labels_test)
+    trade_labels_test = trade_labels_test[t_look_back:]
+    print(f'trade_labels_test shape: {trade_labels_test.shape}')
+
     if t_num_of_lstm > 0:
         # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
         test_features, trade_labels_test = create3dDataset(test_features, trade_labels_test, t_look_back)
-    # display_test_results1(trade_model, test_features, trade_labels_test, trade_model_name)
-    createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
-    plot_signals_chart(trade_model, unscaled_data, test_features, split_index)
+    # createConfusionMatrices(trade_model, trade_model_name, group_name, test_features, trade_labels_test, threshold)
+    # plot_signals_chart(trade_model, unscaled_data, test_features, split_index, trade_labels_test)
+    plot_predictions(trade_model, unscaled_data, test_features, trade_labels_test)
 
     # Testing model w/ labels for half the desired delta
     t1, t2, z = create_dataset(scaled_data, window_size, unscaled_data, trade_window, desired_delta / 2)
@@ -617,8 +761,8 @@ def run_pipeline(data):
         # train_features, trade_labels_train = create3dDataset(train_features, trade_labels_train, t_look_back)
         test_features2, trade_labels_test2 = create3dDataset(test_features2, trade_labels_test2, t_look_back)
     td_name = trade_model_name + '_halvedLabels'
-    # display_test_results1(trade_model, test_features, trade_labels_test, td_name)
-    createConfusionMatrices(trade_model, td_name, group_name, test_features2, trade_labels_test2, threshold)
+    # createConfusionMatrices(trade_model, td_name, group_name, test_features2, trade_labels_test2, threshold)
+    plot_predictions(trade_model, unscaled_data, test_features2, trade_labels_test2)
 
 
 def run_live_pipeline(data):  # all retrain must be False
