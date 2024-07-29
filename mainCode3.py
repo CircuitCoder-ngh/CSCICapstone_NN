@@ -40,7 +40,7 @@ t_lookback = 20
 desired_delta = 1  # 1 for training, 0.5 for testing
 patience = 10
 retrain_encoder = False
-retrain_delta_model = False
+retrain_delta_model = True
 retrain_trade_model = True
 learning_rate = 0.001
 
@@ -641,18 +641,42 @@ def create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads):
     return model
 
 
-def create_lstm_delta_model(input_shape):
-    delta_model = Sequential([
-        LSTM(t_lstm_units, activation='relu', input_shape=input_shape,
-             return_sequences=False),  # , kernel_constraint=max_norm(kc)
-        Dense(4080, activation='relu'),
-        Dropout(0.5),
-        Dense(64, activation='relu'),
-        Dropout(0.5),
-        Dense(2, activation='linear')
-    ])
+def create_lstm_delta_model(hp):
+    inputs = Input(shape=[delta_lookback, 659])
+    hp_units1 = hp.Int('units1', min_value=32, max_value=4096, step=32)
+    hp_units2 = hp.Int('units2', min_value=32, max_value=4096, step=32)
+    hp_units3 = hp.Int('units3', min_value=32, max_value=4096, step=32)
+    hp_units4 = hp.Int('units4', min_value=32, max_value=4096, step=32)
 
-    return delta_model
+    # Tune the activation function to use.
+    activation = hp.Choice("activation", ["relu", "tanh"])
+
+    # LSTM layer
+    lstm_output = LSTM(hp_units1, activation=activation, return_sequences=False)(inputs)
+
+    # Concatenate the initial inputs with the output of the LSTM layer
+    concatenated = Concatenate()([inputs[:, -1, :], lstm_output])
+
+    # Dense and Dropout layers
+    x = Dense(hp_units2, activation=activation)(concatenated)
+    if hp.Boolean("dropout"):
+        x = Dropout(0.5)(x)
+    x = Dense(hp_units3, activation=activation)(x)
+    if hp.Boolean("dropout"):
+        x = Dropout(0.5)(x)
+    if hp.Boolean("thirdLayer"):
+        x = Dense(hp_units4, activation=activation)(x)
+        if hp.Boolean("dropout"):
+            x = Dropout(0.5)(x)
+    outputs = Dense(2, activation='linear')(x)
+
+    # Create the model
+    model = Model(inputs=inputs, outputs=outputs)
+
+    # Compile the model
+    model.compile(optimizer=Adam(learning_rate=learning_rate), loss='mse', metrics=['mae'])
+
+    return model
 
 
 def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
@@ -665,20 +689,66 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
         test_combined, y_test = create3dDataset(test_combined, y_test, delta_lookback)
         input_shape = (train_combined.shape[1], train_combined.shape[2])
 
+        tuner = kt.Hyperband(create_lstm_delta_model,
+                             objective=kt.Objective("val_mae", direction="min"),
+                             max_epochs=10,
+                             factor=3,
+                             directory='tunedModels',
+                             project_name='test1')
+
         # Create the CNN model with multi-head attention and average pooling
         d_model = 256  # Adjust as needed
         num_heads = 4  # Adjust as needed
         # delta_model = create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads)
-        delta_model = create_lstm_delta_model(input_shape)
-        # Compile the model
-        delta_model.compile(optimizer=Adam(learning_rate=learning_rate), loss='mse', metrics=['mae'])
+        # delta_model = create_lstm_delta_model(input_shape)
 
         # Define early stopping callback
         early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
 
         # Train the model
-        delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
-                        validation_data=(test_combined, y_test), callbacks=[early_stopping])
+        # delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
+        #                 validation_data=(test_combined, y_test), callbacks=[early_stopping])
+
+        tuner.search(
+            train_combined, y_train,
+            epochs=t_epochs,
+            batch_size=t_batch_size,
+            validation_data=(test_combined, y_test),
+            callbacks=[early_stopping]
+        )
+
+        # Get the optimal hyperparameters
+        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+
+        print(f"""
+                The hyperparameter search is complete. 
+                best units1: {best_hps.get('units1')}
+                best units2: {best_hps.get('units2')}
+                best units3: {best_hps.get('units3')}
+                best learning rate: {best_hps.get('learning_rate')}.
+                """)
+
+        tuner.search_space_summary()
+
+        # Build the model with the optimal hyperparameters and train it on the data for 50 epochs
+        model = tuner.hypermodel.build(best_hps)
+        history = model.fit(
+            train_combined, y_train,
+            epochs=50,
+            batch_size=t_batch_size,
+            validation_data=(test_combined, y_test),
+            callbacks=[early_stopping]
+        )
+
+        # Get the top 2 models.
+        models = tuner.get_best_models(num_models=2)
+        best_model = models[0]
+        print(f'best model summary:----')
+        best_model.summary()
+        print(f'--------')
+
+        delta_model = best_model
+
         delta_model.save(f'models/{group_name}/{delta_model_name}.keras')
 
     else:  # Load the model
@@ -732,6 +802,7 @@ def create_lstm_trade_model(hp):
     hp_units1 = hp.Int('units1', min_value=32, max_value=1024, step=32)
     hp_units2 = hp.Int('units2', min_value=32, max_value=4096, step=32)
     hp_units3 = hp.Int('units3', min_value=32, max_value=2048, step=32)
+    hp_units4 = hp.Int('units4', min_value=32, max_value=4096, step=32)
 
     # Tune the activation function to use.
     activation = hp.Choice("activation", ["relu", "tanh"])
@@ -749,6 +820,10 @@ def create_lstm_trade_model(hp):
     x = Dense(hp_units3, activation=activation)(x)
     if hp.Boolean("dropout"):
         x = Dropout(0.5)(x)
+    if hp.Boolean("thirdLayer"):
+        x = Dense(hp_units4, activation=activation)(x)
+        if hp.Boolean("dropout"):
+            x = Dropout(0.5)(x)
     outputs = Dense(2, activation='sigmoid')(x)
 
     # Create the model
@@ -789,7 +864,7 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
                              max_epochs=10,
                              factor=3,
                              directory='tunedModels',
-                             project_name='test1')
+                             project_name='test2')
 
         # Train the trade model
         # trade_model.fit(
@@ -836,9 +911,9 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
         print(f'best model summary:----')
         best_model.summary()
         print(f'--------')
+        trade_model = best_model
 
-
-        # trade_model.save(f'models/{group_name}/{trade_model_name}.keras')
+        trade_model.save(f'models/{group_name}/{trade_model_name}_best.keras')
 
     else:  # Load desired model
         trade_model = keras.models.load_model(f'models/{group_name}/{trade_model_name}.keras')
