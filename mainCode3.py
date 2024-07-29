@@ -4,10 +4,12 @@ import time
 # import discord
 from keras.callbacks import EarlyStopping
 from keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D, Dense, Dropout, LSTM, Flatten, AveragePooling1D,\
-    Layer, Reshape, MultiHeadAttention
+    Layer, Reshape, MultiHeadAttention, Concatenate
 from keras.models import Model, Sequential
+from keras.optimizers import Adam
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow import keras
+import keras_tuner as kt
 import tensorflow as tf
 from helperFunctions import *
 
@@ -20,11 +22,11 @@ from helperFunctions import *
 """
 
 encoder_name = 'autoencoder1'
-delta_model_name = 'deltaModel1'
-trade_model_name = 'tradeModel1'
+delta_model_name = 'deltaModel_lstm1'
+trade_model_name = 'tradeModel_lstm1'
 group_name = 'groupTransformer'
-up_threshold = 0.9
-down_threshold = 0.9
+up_threshold = 0.7
+down_threshold = 0.7
 trade_window = 12    # distance to predict price delta and trade opportunity
 window_size = 40  # window size (for CNN lookback)
 ae_epochs = 200  # for autoencoder
@@ -38,8 +40,9 @@ t_lookback = 20
 desired_delta = 1  # 1 for training, 0.5 for testing
 patience = 10
 retrain_encoder = False
-retrain_delta_model = True
+retrain_delta_model = False
 retrain_trade_model = True
+learning_rate = 0.001
 
 # deprecated variables
 one_output = False  # used to indicate use of LSTM
@@ -72,10 +75,8 @@ def normalizeData(data):
     # convert date into timestamp into 'time of day' indicator
     for item in data:
         day = 24 * 60 * 60
-        # tp = item[0]
         item[0] = relative_time_of_day(item[0])
         item[0] = np.sin(item[0] * (2 * np.pi / day))
-        # print(f'{tp} == {item[0]}')
 
     # Convert to pd dataFrame to compute delta values
     df = pd.DataFrame(data)
@@ -640,6 +641,20 @@ def create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads):
     return model
 
 
+def create_lstm_delta_model(input_shape):
+    delta_model = Sequential([
+        LSTM(t_lstm_units, activation='relu', input_shape=input_shape,
+             return_sequences=False),  # , kernel_constraint=max_norm(kc)
+        Dense(4080, activation='relu'),
+        Dropout(0.5),
+        Dense(64, activation='relu'),
+        Dropout(0.5),
+        Dense(2, activation='linear')
+    ])
+
+    return delta_model
+
+
 def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
     # # Define the price delta prediction model
     # # [samples, window_size / 4, # filters in last CNN]
@@ -653,9 +668,10 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
         # Create the CNN model with multi-head attention and average pooling
         d_model = 256  # Adjust as needed
         num_heads = 4  # Adjust as needed
-        delta_model = create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads)
+        # delta_model = create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads)
+        delta_model = create_lstm_delta_model(input_shape)
         # Compile the model
-        delta_model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+        delta_model.compile(optimizer=Adam(learning_rate=learning_rate), loss='mse', metrics=['mae'])
 
         # Define early stopping callback
         early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
@@ -710,6 +726,44 @@ def create_cnn_with_attention_for_trade_model(input_shape, d_model, num_heads):
     return model
 
 
+def create_lstm_trade_model(hp):
+    # Define the input layer
+    inputs = Input(shape=[t_lookback, 661])
+    hp_units1 = hp.Int('units1', min_value=32, max_value=1024, step=32)
+    hp_units2 = hp.Int('units2', min_value=32, max_value=4096, step=32)
+    hp_units3 = hp.Int('units3', min_value=32, max_value=2048, step=32)
+
+    # Tune the activation function to use.
+    activation = hp.Choice("activation", ["relu", "tanh"])
+
+    # LSTM layer
+    lstm_output = LSTM(hp_units1, activation=activation, return_sequences=False)(inputs)
+
+    # Concatenate the initial inputs with the output of the LSTM layer
+    concatenated = Concatenate()([inputs[:, -1, :], lstm_output])
+
+    # Dense and Dropout layers
+    x = Dense(hp_units2, activation=activation)(concatenated)
+    if hp.Boolean("dropout"):
+        x = Dropout(0.5)(x)
+    x = Dense(hp_units3, activation=activation)(x)
+    if hp.Boolean("dropout"):
+        x = Dropout(0.5)(x)
+    outputs = Dense(2, activation='sigmoid')(x)
+
+    # Create the model
+    model = Model(inputs=inputs, outputs=outputs)
+
+    # Tune the learning rate for the optimizer
+    # Choose an optimal value from 0.01, 0.001, or 0.0001
+    hp_learning_rate = hp.Choice('learning_rate', values=[1e-2, 1e-3, 1e-4])
+
+    model.compile(optimizer=Adam(learning_rate=hp_learning_rate),
+                        loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
+
+    return model
+
+
 def get_trade_model(retrain, train_features, trade_labels_train, test_features, trade_labels_test):
     if retrain:
         # Ensure the input shape is correct for the CNN model
@@ -720,15 +774,32 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
         # Create the CNN model with multi-head attention and average pooling
         d_model = 256  # Adjust as needed
         num_heads = 4  # Adjust as needed
-        trade_model = create_cnn_with_attention_for_trade_model(input_shape, d_model, num_heads)
+        # trade_model = create_cnn_with_attention_for_trade_model(input_shape, d_model, num_heads)
 
-        trade_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
+        # trade_model = create_lstm_trade_model(input_shape, hp)
+
 
         # Define early stopping callback
         early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
 
+        hp = kt.HyperParameters()
+
+        tuner = kt.Hyperband(create_lstm_trade_model,
+                             objective=kt.Objective("val_precision", direction="max"),
+                             max_epochs=10,
+                             factor=3,
+                             directory='tunedModels',
+                             project_name='test1')
+
         # Train the trade model
-        trade_model.fit(
+        # trade_model.fit(
+        #     train_features, trade_labels_train,
+        #     epochs=t_epochs,
+        #     batch_size=t_batch_size,
+        #     validation_data=(test_features, trade_labels_test),
+        #     callbacks=[early_stopping]
+        # )
+        tuner.search(
             train_features, trade_labels_train,
             epochs=t_epochs,
             batch_size=t_batch_size,
@@ -736,7 +807,38 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
             callbacks=[early_stopping]
         )
 
-        trade_model.save(f'models/{group_name}/{trade_model_name}.keras')
+        # Get the optimal hyperparameters
+        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+
+        print(f"""
+        The hyperparameter search is complete. 
+        best units1: {best_hps.get('units1')}
+        best units2: {best_hps.get('units2')}
+        best units3: {best_hps.get('units3')}
+        best learning rate: {best_hps.get('learning_rate')}.
+        """)
+
+        tuner.search_space_summary()
+
+        # Build the model with the optimal hyperparameters and train it on the data for 50 epochs
+        model = tuner.hypermodel.build(best_hps)
+        history = model.fit(
+            train_features, trade_labels_train,
+            epochs=50,
+            batch_size=t_batch_size,
+            validation_data=(test_features, trade_labels_test),
+            callbacks=[early_stopping]
+        )
+
+        # Get the top 2 models.
+        models = tuner.get_best_models(num_models=2)
+        best_model = models[0]
+        print(f'best model summary:----')
+        best_model.summary()
+        print(f'--------')
+
+
+        # trade_model.save(f'models/{group_name}/{trade_model_name}.keras')
 
     else:  # Load desired model
         trade_model = keras.models.load_model(f'models/{group_name}/{trade_model_name}.keras')
@@ -819,9 +921,10 @@ def run_pipeline(data):
     print(f'trade_labels_test shape: {trade_labels_test.shape}')
 
     # Get trade model and test it
+    trade_labels_test = trade_labels_test[delta_lookback:]
+    trade_labels_train = trade_labels_train[delta_lookback:]
     trade_model = get_trade_model(retrain_trade_model, train_features, trade_labels_train, test_features,
                                   trade_labels_test)
-    trade_labels_test = trade_labels_test[delta_lookback:]
     print(f'trade_labels_test shape: {trade_labels_test.shape}')
     print(f'trade model summary: {trade_model.summary()}')
 
