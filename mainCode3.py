@@ -22,8 +22,8 @@ from helperFunctions import *
 """
 
 encoder_name = 'autoencoder1'
-delta_model_name = 'deltaModel_lstm1'
-trade_model_name = 'tradeModel_lstm1'
+delta_model_name = 'deltaModel_lstm1a'
+trade_model_name = 'tradeModel_lstm1a'
 group_name = 'groupTransformer'
 up_threshold = 0.7
 down_threshold = 0.7
@@ -694,6 +694,7 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
                              max_epochs=10,
                              factor=3,
                              directory='tunedModels',
+                             overwrite=False,
                              project_name='test1')
 
         # Create the CNN model with multi-head attention and average pooling
@@ -749,7 +750,7 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
 
         delta_model = best_model
 
-        delta_model.save(f'models/{group_name}/{delta_model_name}.keras')
+        delta_model.save(f'models/{group_name}/{delta_model_name}_best.keras')
 
     else:  # Load the model
         delta_model = keras.models.load_model(f'models/{group_name}/{delta_model_name}.keras')
