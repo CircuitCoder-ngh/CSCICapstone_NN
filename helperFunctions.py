@@ -150,11 +150,44 @@ def create3dDataset(dataset, data_labels, look_back):  # look_back must be 1 w/ 
     return dataX, dataY
 
 
-def addDailyATRLines(d):
+def addFVGinputs(dataset):
+    """
+    data; (datetime,close,open,high,low,vol,obv,rsi,atr,macd)
+    for item in data:
+        if bearish fvg has formed, item.append(-1)
+        if bullish fvg has formed, item.append(1)
+        if no fvg is present, item.append(0)
+    """
+    data = pd.DataFrame(dataset)
+
+    # Convert the 'datetime' column to datetime format
+    data['datetime'] = pd.to_datetime(data['datetime'])
+
+    # Ensure the DataFrame is sorted by datetime
+    data = data.sort_values(by='datetime').reset_index(drop=True)
+
+    # Initialize the new column for FVG signals
+    data['fvg_signal'] = 0
+
+    # Iterate through the DataFrame starting from the third row
+    for i in range(2, len(data)):
+        current_row = data.iloc[i]
+        two_steps_back_row = data.iloc[i - 2]
+
+        # Check for bullish FVG
+        if current_row['low'] > two_steps_back_row['high']:
+            data.at[i, 'fvg_signal'] = 1
+        # Check for bearish FVG
+        elif current_row['high'] < two_steps_back_row['low']:
+            data.at[i, 'fvg_signal'] = -1
+
+    return data
+
+def addDailyATRLines(dataset):
     # TODO: add ATR lines to data before saving to 'current.csv' in refresh live data fn
     # TODO: add distance from ATR lines as input
     atr_vals = pd.DataFrame(csvToList('historical_data/SPYdaily_ATR.csv'))
-    data = pd.DataFrame(d)
+    data = pd.DataFrame(dataset)
     """
     data; (datetime,close,open,high,low,vol,obv,rsi,atr,macd)
     atr_vals; (datetime,atr)
