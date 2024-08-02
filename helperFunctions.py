@@ -56,6 +56,37 @@ def combineDataToCSV_AV(symbol, interval, month, time_period, optional=None):
     print(f"Data saved to {csv_file_path}")
 
 
+def combineDailyATRToCSV_AV(symbol, interval, time_period, optional=None):
+
+    data_atr = getATR_AV(symbol=symbol, interval=interval, time_period=time_period, month=None)
+
+    # Initialize the combined list
+    combined_list = []
+
+    # Merge indicator values
+    for sample_atr in data_atr['Technical Analysis: ATR']:
+        combined_sample = {
+            'datetime': sample_atr,
+            'atr': data_atr['Technical Analysis: ATR'][sample_atr]['ATR']
+        }
+        combined_list.append(combined_sample)
+
+    # puts list in chronological order (loc[0] is oldest, loc[i] is most recent
+    combined_list = reverse_list(combined_list)
+
+    # Create a DataFrame from the combined list
+    df = pd.DataFrame(combined_list)
+
+    filtered_df = df[df['datetime'] >= '2021-01-01']
+
+    csv_file_path = f'historical_data/{symbol}{interval}_ATR.csv'
+
+    # Write the DataFrame to the CSV file
+    filtered_df.to_csv(csv_file_path, index=False)
+
+    print(f"Data saved to {csv_file_path}")
+
+
 def csvToList(filename):
     """Reads in CSV data, removes header and converts it to a list.
     Returns the newly created list"""
@@ -117,3 +148,127 @@ def create3dDataset(dataset, data_labels, look_back):  # look_back must be 1 w/ 
     print(dataX.shape)
     print(dataY.shape)
     return dataX, dataY
+
+
+def addFVGinputs(dataset):
+    """
+    data; (datetime,close,open,high,low,vol,obv,rsi,atr,macd)
+    for item in data:
+        if bearish fvg has formed, item.append(-1)
+        if bullish fvg has formed, item.append(1)
+        if no fvg is present, item.append(0)
+    """
+    data = pd.DataFrame(dataset)
+
+    # Convert the 'datetime' column to datetime format
+    data['datetime'] = pd.to_datetime(data['datetime'])
+
+    # Ensure the DataFrame is sorted by datetime
+    data = data.sort_values(by='datetime').reset_index(drop=True)
+
+    # Initialize the new column for FVG signals
+    data['fvg_signal'] = 0
+
+    # Iterate through the DataFrame starting from the third row
+    for i in range(2, len(data)):
+        current_row = data.iloc[i]
+        two_steps_back_row = data.iloc[i - 2]
+
+        # Check for bullish FVG
+        if current_row['low'] > two_steps_back_row['high']:
+            data.at[i, 'fvg_signal'] = 1
+        # Check for bearish FVG
+        elif current_row['high'] < two_steps_back_row['low']:
+            data.at[i, 'fvg_signal'] = -1
+
+    return data
+
+def addDailyATRLines(dataset):
+    # TODO: add ATR lines to data before saving to 'current.csv' in refresh live data fn
+    # TODO: add distance from ATR lines as input
+    atr_vals = pd.DataFrame(csvToList('historical_data/SPYdaily_ATR.csv'))
+    data = pd.DataFrame(dataset)
+    """
+    data; (datetime,close,open,high,low,vol,obv,rsi,atr,macd)
+    atr_vals; (datetime,atr)
+    for item in data:
+        if new day -> save prev_day_close, get atr w/ matching date, and calculate new atr lines
+        calculate item distance from each line
+        item.append(distance from atr lines)
+    """
+    # Convert the 'datetime' columns to datetime objects
+    data['datetime'] = pd.to_datetime(data['datetime'])
+    atr_vals['datetime'] = pd.to_datetime(atr_vals['datetime'])
+
+    # Extract the date part from the 'datetime' column in data
+    data['date'] = data['datetime'].dt.date
+
+    # Merge ATR values into the main data on the 'date' column
+    data = data.merge(atr_vals, left_on='date', right_on='datetime', how='left', suffixes=('', '_atr'))
+
+    # Initialize new columns for distances from upper and lower lines
+    for i in range(1, 7):
+        data[f'distance_from_upperLine{i}'] = None
+        data[f'distance_from_lowerLine{i}'] = None
+
+    prev_day_close = None
+    upper_lines = None
+    lower_lines = None
+
+    for i in range(len(data)):
+        current_row = data.iloc[i]
+
+        # Check if a new day starts
+        if i == 0 or current_row['date'] != data.iloc[i - 1]['date']:
+            # TODO: this calcs atr lines from 4:30 close instead of 4:00 (aka 16:00)
+            prev_day_close = data.iloc[i - 1]['close']
+            atr = current_row['atr']
+
+            # Calculate upper and lower lines based on ATR multiples
+            upper_lines = [prev_day_close + (multiplier * atr) for multiplier in [0.236, 0.382, 0.5, 0.618, 0.786, 1]]
+            lower_lines = [prev_day_close - (multiplier * atr) for multiplier in [0.236, 0.382, 0.5, 0.618, 0.786, 1]]
+
+        # Calculate distances from upper and lower lines for each row
+        for j in range(1, 7):
+            data.at[i, f'distance_from_upperLine{j}'] = abs(current_row['close'] - upper_lines[j])
+            data.at[i, f'distance_from_lowerLine{j}'] = abs(current_row['close'] - lower_lines[j])
+
+    # Drop the extra 'datetime_atr' and 'date' columns
+    data = data.drop(columns=['datetime_atr', 'date'])
+
+    return data
+
+
+# TODO: fix this
+# def combineAndFilter(data):
+# # ------------- data prep for groupC ------------------- #
+# #     for loop creating raw csv data for each month 2021-2023
+#     years = [2021, 2022, 2023]
+#     months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
+#     for yr in years:
+#         for m in months:
+#             combineDataToCSV_AV(symbol='SPY', interval='1min', month=f'{yr}-{m}', time_period=14)
+#
+#     # combine csv files for dif months into single csv
+#     df_csv_append = pd.DataFrame()
+#     path = f"historical_data/SPY1min_raw"
+#     dirs = os.listdir(path)
+#     for file in dirs:
+#         if file.endswith(".csv"):
+#             df = pd.read_csv(f'historical_data/SPY1min_raw/{file}')
+#             df_csv_append = pd.concat([df_csv_append, df], ignore_index=True)
+#     df_csv_append.to_csv(f'historical_data/SPY1min_rawCombined.csv', index=False)
+#
+#     # filter out extended hours data
+#     df = pd.read_csv('historical_data/SPY1min_rawCombined.csv')
+#     # Convert the timestamp column to datetime
+#     df['datetime'] = pd.to_datetime(df['datetime'])
+#     # Filter rows between 09:30:00 and 16:00:00
+#     filtered_df = df[(df['datetime'].dt.time >= pd.to_datetime('09:00:00').time()) &
+#                      (df['datetime'].dt.time <= pd.to_datetime('16:25:00').time())]
+#     # Print the filtered DataFrame
+#     filtered_df.to_csv(f'historical_data/SPY1min_rawCombinedFiltered.csv', index=False)
+#
+#     # create training labels (save csv) -> normalize data (save csv) -> train groupB models w/ this
+#     createTrainingLabelCSV('historical_data/SPY5min_rawCombinedFiltered.csv', 0.2)
+#     normalizeListToCSV('historical_data/SPY5min_rawCombinedFiltered.csv')
