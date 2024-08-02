@@ -163,9 +163,6 @@ def addFVGinputs(dataset):
     # Convert the 'datetime' column to datetime format
     data['datetime'] = pd.to_datetime(data['datetime'])
 
-    # Ensure the DataFrame is sorted by datetime
-    data = data.sort_values(by='datetime').reset_index(drop=True)
-
     # Initialize the new column for FVG signals
     data['fvg_signal'] = 0
 
@@ -182,6 +179,7 @@ def addFVGinputs(dataset):
             data.at[i, 'fvg_signal'] = -1
 
     return data
+
 
 def addDailyATRLines(dataset):
     # TODO: add ATR lines to data before saving to 'current.csv' in refresh live data fn

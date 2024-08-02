@@ -43,6 +43,8 @@ retrain_encoder = False
 retrain_delta_model = True
 retrain_trade_model = True
 learning_rate = 0.001
+tuning_delta_model = False
+tuning_trade_model = False
 
 # deprecated variables
 one_output = False  # used to indicate use of LSTM
@@ -679,6 +681,38 @@ def create_lstm_delta_model(hp):
     return model
 
 
+def create_simple_lstm_delta_model(input_shape):
+    hp_units1 = 288
+    hp_units2 = 1920
+    hp_units3 = 1344
+    # hp_units4 =
+    inputs = Input(shape=input_shape)
+
+    activation = 'relu'
+    # LSTM layer
+    lstm_output = LSTM(hp_units1, activation=activation, return_sequences=False)(inputs)
+
+    # Concatenate the initial inputs with the output of the LSTM layer
+    concatenated = Concatenate()([inputs[:, -1, :], lstm_output])
+
+    # Dense and Dropout layers
+    x = Dense(hp_units2, activation=activation)(concatenated)
+    x = Dropout(0.5)(x)
+    x = Dense(hp_units3, activation=activation)(x)
+    x = Dropout(0.5)(x)
+    # x = Dense(hp_units4, activation=activation)(x)
+    # x = Dropout(0.5)(x)
+    outputs = Dense(2, activation='linear')(x)
+
+    # Create the model
+    model = Model(inputs=inputs, outputs=outputs)
+
+    # Compile the model
+    model.compile(optimizer=Adam(learning_rate=learning_rate), loss='mse', metrics=['mae'])
+
+    return model
+
+
 def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
     # # Define the price delta prediction model
     # # [samples, window_size / 4, # filters in last CNN]
@@ -689,66 +723,66 @@ def get_delta_model(retrain, train_combined, y_train, test_combined, y_test):
         test_combined, y_test = create3dDataset(test_combined, y_test, delta_lookback)
         input_shape = (train_combined.shape[1], train_combined.shape[2])
 
-        tuner = kt.Hyperband(create_lstm_delta_model,
-                             objective=kt.Objective("val_mae", direction="min"),
-                             max_epochs=10,
-                             factor=3,
-                             directory='tunedModels',
-                             overwrite=False,
-                             project_name='test1')
-
-        # Create the CNN model with multi-head attention and average pooling
-        d_model = 256  # Adjust as needed
-        num_heads = 4  # Adjust as needed
-        # delta_model = create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads)
-        # delta_model = create_lstm_delta_model(input_shape)
-
         # Define early stopping callback
         early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
 
-        # Train the model
-        # delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
-        #                 validation_data=(test_combined, y_test), callbacks=[early_stopping])
+        if tuning_delta_model:
+            tuner = kt.Hyperband(create_lstm_delta_model,
+                                 objective=kt.Objective("val_mae", direction="min"),
+                                 max_epochs=10,
+                                 factor=3,
+                                 directory='tunedModels',
+                                 overwrite=False,
+                                 project_name='test1')
 
-        tuner.search(
-            train_combined, y_train,
-            epochs=t_epochs,
-            batch_size=t_batch_size,
-            validation_data=(test_combined, y_test),
-            callbacks=[early_stopping]
-        )
+            tuner.search(
+                train_combined, y_train,
+                epochs=t_epochs,
+                batch_size=t_batch_size,
+                validation_data=(test_combined, y_test),
+                callbacks=[early_stopping]
+            )
 
-        # Get the optimal hyperparameters
-        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+            # Get the optimal hyperparameters
+            best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
 
-        print(f"""
-                The hyperparameter search is complete. 
-                best units1: {best_hps.get('units1')}
-                best units2: {best_hps.get('units2')}
-                best units3: {best_hps.get('units3')}
-                best learning rate: {best_hps.get('learning_rate')}.
-                """)
+            print(f"""
+                    The hyperparameter search is complete. 
+                    best units1: {best_hps.get('units1')}
+                    best units2: {best_hps.get('units2')}
+                    best units3: {best_hps.get('units3')}
+                    best learning rate: {best_hps.get('learning_rate')}.
+                    """)
 
-        tuner.search_space_summary()
+            tuner.search_space_summary()
 
-        # Build the model with the optimal hyperparameters and train it on the data for 50 epochs
-        model = tuner.hypermodel.build(best_hps)
-        history = model.fit(
-            train_combined, y_train,
-            epochs=50,
-            batch_size=t_batch_size,
-            validation_data=(test_combined, y_test),
-            callbacks=[early_stopping]
-        )
+            # Build the model with the optimal hyperparameters and train it on the data for 50 epochs
+            model = tuner.hypermodel.build(best_hps)
+            history = model.fit(
+                train_combined, y_train,
+                epochs=50,
+                batch_size=t_batch_size,
+                validation_data=(test_combined, y_test),
+                callbacks=[early_stopping]
+            )
 
-        # Get the top 2 models.
-        models = tuner.get_best_models(num_models=2)
-        best_model = models[0]
-        print(f'best model summary:----')
-        best_model.summary()
-        print(f'--------')
+            # Get the top 2 models.
+            models = tuner.get_best_models(num_models=2)
+            best_model = models[0]
+            print(f'best model summary:----')
+            best_model.summary()
+            print(f'--------')
 
-        delta_model = best_model
+            delta_model = best_model
+        else:
+            # Create the CNN model with multi-head attention and average pooling
+            d_model = 256  # Adjust as needed
+            num_heads = 4  # Adjust as needed
+            # delta_model = create_cnn_with_attention_for_delta_model(input_shape, d_model, num_heads)
+            delta_model = create_simple_lstm_delta_model(input_shape)
+            # Train the model
+            delta_model.fit(train_combined, y_train, epochs=d_epochs, batch_size=d_batch_size,
+                        validation_data=(test_combined, y_test), callbacks=[early_stopping])
 
         delta_model.save(f'models/{group_name}/{delta_model_name}_best.keras')
 
@@ -840,6 +874,41 @@ def create_lstm_trade_model(hp):
     return model
 
 
+def create_simple_lstm_trade_model(input_shape):
+    # Define the input layer
+    inputs = Input(shape=input_shape)
+    hp_units1 = 288
+    hp_units2 = 1920
+    hp_units3 = 1344
+    # hp_units4 =
+
+    # Tune the activation function to use.
+    activation = 'relu'
+
+    # LSTM layer
+    lstm_output = LSTM(hp_units1, activation=activation, return_sequences=False)(inputs)
+
+    # Concatenate the initial inputs with the output of the LSTM layer
+    concatenated = Concatenate()([inputs[:, -1, :], lstm_output])
+
+    # Dense and Dropout layers
+    x = Dense(hp_units2, activation=activation)(concatenated)
+    x = Dropout(0.5)(x)
+    x = Dense(hp_units3, activation=activation)(x)
+    x = Dropout(0.5)(x)
+    # x = Dense(hp_units4, activation=activation)(x)
+    # x = Dropout(0.5)(x)
+    outputs = Dense(2, activation='sigmoid')(x)
+
+    # Create the model
+    model = Model(inputs=inputs, outputs=outputs)
+
+    model.compile(optimizer=Adam(learning_rate=learning_rate),
+                        loss='binary_crossentropy', metrics=[keras.metrics.Precision()])
+
+    return model
+
+
 def get_trade_model(retrain, train_features, trade_labels_train, test_features, trade_labels_test):
     if retrain:
         # Ensure the input shape is correct for the CNN model
@@ -850,69 +919,69 @@ def get_trade_model(retrain, train_features, trade_labels_train, test_features, 
         # Create the CNN model with multi-head attention and average pooling
         d_model = 256  # Adjust as needed
         num_heads = 4  # Adjust as needed
-        # trade_model = create_cnn_with_attention_for_trade_model(input_shape, d_model, num_heads)
-
-        # trade_model = create_lstm_trade_model(input_shape, hp)
-
 
         # Define early stopping callback
         early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
 
-        hp = kt.HyperParameters()
+        if tuning_trade_model:
+            tuner = kt.Hyperband(create_lstm_trade_model,
+                                 objective=kt.Objective("val_precision", direction="max"),
+                                 max_epochs=10,
+                                 factor=3,
+                                 directory='tunedModels',
+                                 project_name='test2')
 
-        tuner = kt.Hyperband(create_lstm_trade_model,
-                             objective=kt.Objective("val_precision", direction="max"),
-                             max_epochs=10,
-                             factor=3,
-                             directory='tunedModels',
-                             project_name='test2')
+            tuner.search(
+                train_features, trade_labels_train,
+                epochs=t_epochs,
+                batch_size=t_batch_size,
+                validation_data=(test_features, trade_labels_test),
+                callbacks=[early_stopping]
+            )
 
-        # Train the trade model
-        # trade_model.fit(
-        #     train_features, trade_labels_train,
-        #     epochs=t_epochs,
-        #     batch_size=t_batch_size,
-        #     validation_data=(test_features, trade_labels_test),
-        #     callbacks=[early_stopping]
-        # )
-        tuner.search(
-            train_features, trade_labels_train,
-            epochs=t_epochs,
-            batch_size=t_batch_size,
-            validation_data=(test_features, trade_labels_test),
-            callbacks=[early_stopping]
-        )
+            # Get the optimal hyperparameters
+            best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
 
-        # Get the optimal hyperparameters
-        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+            print(f"""
+            The hyperparameter search is complete. 
+            best units1: {best_hps.get('units1')}
+            best units2: {best_hps.get('units2')}
+            best units3: {best_hps.get('units3')}
+            best learning rate: {best_hps.get('learning_rate')}.
+            """)
 
-        print(f"""
-        The hyperparameter search is complete. 
-        best units1: {best_hps.get('units1')}
-        best units2: {best_hps.get('units2')}
-        best units3: {best_hps.get('units3')}
-        best learning rate: {best_hps.get('learning_rate')}.
-        """)
+            tuner.search_space_summary()
 
-        tuner.search_space_summary()
+            # Build the model with the optimal hyperparameters and train it on the data for 50 epochs
+            model = tuner.hypermodel.build(best_hps)
+            history = model.fit(
+                train_features, trade_labels_train,
+                epochs=50,
+                batch_size=t_batch_size,
+                validation_data=(test_features, trade_labels_test),
+                callbacks=[early_stopping]
+            )
 
-        # Build the model with the optimal hyperparameters and train it on the data for 50 epochs
-        model = tuner.hypermodel.build(best_hps)
-        history = model.fit(
-            train_features, trade_labels_train,
-            epochs=50,
-            batch_size=t_batch_size,
-            validation_data=(test_features, trade_labels_test),
-            callbacks=[early_stopping]
-        )
+            # Get the top 2 models.
+            models = tuner.get_best_models(num_models=2)
+            best_model = models[0]
+            print(f'best model summary:----')
+            best_model.summary()
+            print(f'--------')
+            trade_model = best_model
 
-        # Get the top 2 models.
-        models = tuner.get_best_models(num_models=2)
-        best_model = models[0]
-        print(f'best model summary:----')
-        best_model.summary()
-        print(f'--------')
-        trade_model = best_model
+        else:
+            # trade_model = create_cnn_with_attention_for_trade_model(input_shape, d_model, num_heads)
+
+            trade_model = create_simple_lstm_trade_model(input_shape)
+            # Train the trade model
+            trade_model.fit(
+                train_features, trade_labels_train,
+                epochs=t_epochs,
+                batch_size=t_batch_size,
+                validation_data=(test_features, trade_labels_test),
+                callbacks=[early_stopping]
+            )
 
         trade_model.save(f'models/{group_name}/{trade_model_name}_best.keras')
 
