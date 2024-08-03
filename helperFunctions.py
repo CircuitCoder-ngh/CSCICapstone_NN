@@ -184,7 +184,7 @@ def addFVGinputs(dataset):
 def addDailyATRLines(dataset):
     # TODO: add ATR lines to data before saving to 'current.csv' in refresh live data fn
     # TODO: add distance from ATR lines as input
-    atr_vals = pd.DataFrame(csvToList('historical_data/SPYdaily_ATR.csv'))
+    atr_vals = pd.read_csv('historical_data/SPYdaily_ATR.csv')
     data = pd.DataFrame(dataset)
     """
     data; (datetime,close,open,high,low,vol,obv,rsi,atr,macd)
@@ -200,9 +200,10 @@ def addDailyATRLines(dataset):
 
     # Extract the date part from the 'datetime' column in data
     data['date'] = data['datetime'].dt.date
+    atr_vals['date'] = atr_vals['datetime'].dt.date
 
-    # Merge ATR values into the main data on the 'date' column
-    data = data.merge(atr_vals, left_on='date', right_on='datetime', how='left', suffixes=('', '_atr'))
+    # Set 'date' as the index for atr_vals
+    atr_vals.set_index('date', inplace=True)
 
     # Initialize new columns for distances from upper and lower lines
     for i in range(1, 7):
@@ -219,20 +220,31 @@ def addDailyATRLines(dataset):
         # Check if a new day starts
         if i == 0 or current_row['date'] != data.iloc[i - 1]['date']:
             # TODO: this calcs atr lines from 4:30 close instead of 4:00 (aka 16:00)
-            prev_day_close = data.iloc[i - 1]['close']
-            atr = current_row['atr']
+            if i == 0:
+                prev_day_close = current_row['close']
+            else:
+                prev_day_close = data.iloc[i - 1]['close']
 
-            # Calculate upper and lower lines based on ATR multiples
-            upper_lines = [prev_day_close + (multiplier * atr) for multiplier in [0.236, 0.382, 0.5, 0.618, 0.786, 1]]
-            lower_lines = [prev_day_close - (multiplier * atr) for multiplier in [0.236, 0.382, 0.5, 0.618, 0.786, 1]]
+            date = current_row['date']
 
-        # Calculate distances from upper and lower lines for each row
-        for j in range(1, 7):
-            data.at[i, f'distance_from_upperLine{j}'] = abs(current_row['close'] - upper_lines[j])
-            data.at[i, f'distance_from_lowerLine{j}'] = abs(current_row['close'] - lower_lines[j])
+            # Retrieve the ATR value for the specific date, handling missing dates
+            atr = atr_vals.at[date, 'atr'] if date in atr_vals.index else None
+
+            if atr is not None:
+                # Calculate upper and lower lines based on ATR multiples
+                upper_lines = [prev_day_close + (multiplier * atr) for multiplier in
+                               [0.236, 0.382, 0.5, 0.618, 0.786, 1]]
+                lower_lines = [prev_day_close - (multiplier * atr) for multiplier in
+                               [0.236, 0.382, 0.5, 0.618, 0.786, 1]]
+
+        if upper_lines and lower_lines:
+            # Calculate distances from upper and lower lines for each row
+            for j in range(6):
+                data.at[i, f'distance_from_upperLine{j + 1}'] = abs(current_row['close'] - upper_lines[j])
+                data.at[i, f'distance_from_lowerLine{j + 1}'] = abs(current_row['close'] - lower_lines[j])
 
     # Drop the extra 'datetime_atr' and 'date' columns
-    data = data.drop(columns=['datetime_atr', 'date'])
+    data = data.drop(columns=['date'])
 
     return data
 

@@ -21,9 +21,9 @@ from helperFunctions import *
 3. adjust creation of training data ( ) to include FVG and distance from daily satyATR lines
 """
 
-encoder_name = 'autoencoder1'
-delta_model_name = 'deltaModel_lstm1a'
-trade_model_name = 'tradeModel_lstm1a'
+encoder_name = 'autoencoder2'
+delta_model_name = 'deltaModel_lstm2'
+trade_model_name = 'tradeModel_lstm2'
 group_name = 'groupTransformer'
 up_threshold = 0.7
 down_threshold = 0.7
@@ -31,10 +31,10 @@ trade_window = 12    # distance to predict price delta and trade opportunity
 window_size = 40  # window size (for CNN lookback)
 ae_epochs = 200  # for autoencoder
 ae_batch_size = 6
-d_epochs = 200  # for delta model
+d_epochs = 5  # for delta model
 d_batch_size = 6
 delta_lookback = 20
-t_epochs = 200  # for trade model
+t_epochs = 5  # for trade model
 t_batch_size = 6
 t_lookback = 20
 desired_delta = 1  # 1 for training, 0.5 for testing
@@ -501,6 +501,7 @@ def display_test_results2(model, test_data, test_labels):
 
 
 def get_encoder(retrain, num_inputs, X_train, X_test):
+    # TODO: create tuner and test dif hyperparameters (num_filters, num_filters2, thirdLayer, num_filters3, etc.)
     if retrain:
         # Define the CNN Autoencoder model
         input_layer = Input(shape=(window_size, num_inputs))  # window_size * # of inputs
@@ -1352,9 +1353,14 @@ while live:
 
 
 # retrieve historical data : [datetime,close,open,high,low,vol,obv,rsi,atr,macd]
-raw_list = csvToList('historical_data/SPY5min_rawCombinedFiltered.csv')[:-trade_window-2]
+# raw_list = pd.read_csv('historical_data/SPY5min_rawCombinedFiltered.csv')[:-trade_window-2]
+# raw_list = addFVGinputs(raw_list)
+# raw_list = addDailyATRLines(raw_list)
+# listToCSV(raw_list, 'historical_data/SPY5min_rawCombinedFiltered_plusFVGsandATRs')
+raw_list = csvToList('historical_data/SPY5min_rawCombinedFiltered_plusFVGsandATRs')
 # split = int(len(raw_list) / 3)
 # raw_list = raw_list[2*split:]
+
 run_pipeline(raw_list)
 # print('test 1 complete ---------------------')
 # split_index = int(len(raw_list) * 0.8)
